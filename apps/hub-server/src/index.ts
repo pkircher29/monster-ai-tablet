@@ -42,6 +42,8 @@ export {
 export type { CliLocator, ReconToolDefinition, ToolReconProviderOptions } from './recon/index.js';
 export { startAiSpyBridge } from './ai-spy/bridge.js';
 export type { AiSpyBridge, AiSpyBridgeOptions } from './ai-spy/bridge.js';
+export { createHubAuth } from './auth.js';
+export type { HubAuth, HubAuthOptions, HubAuthSession, HubLoginResult } from './auth.js';
 export { createOpenRouterAdapter, OpenRouterAdapterError } from './providers/openrouter/index.js';
 export type {
   AtomicReservationLedger,

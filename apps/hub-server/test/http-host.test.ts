@@ -10,9 +10,11 @@ import {
   DEFAULT_HUB_BUDGET_CEILING_MICRODOLLARS,
   MAX_HUB_STATIC_FILE_BYTES,
   createHubServer,
+  createHubAuth,
   createServerOwnedAgentRegistry,
   startHubServer,
   stopHubServer,
+  type HubAuth,
 } from '../dist/index.js';
 
 interface TestResponse {
@@ -89,7 +91,7 @@ function sendRequest(
 
 async function withTestServer(
   run: (baseUrl: URL) => Promise<void>,
-  options: { readonly now?: Date } = {},
+  options: { readonly now?: Date; readonly auth?: HubAuth } = {},
 ): Promise<void> {
   const now = options.now ?? new Date(Date.now() - 1_000);
   const started = await startHubServer({
@@ -97,6 +99,7 @@ async function withTestServer(
     port: 0,
     staticDirectory,
     clock: () => new Date(now),
+    auth: options.auth,
   });
   try {
     await run(started.url);
@@ -194,6 +197,66 @@ test('serves a minimal health response with same-origin security headers', async
     assert.equal(response.headers['access-control-allow-origin'], undefined);
     assert.equal(response.headers['cache-control'], 'no-store');
   });
+});
+
+test('authenticates the operator with a rate-limited httpOnly session cookie', async () => {
+  const auth = createHubAuth({ password: 'correct horse battery staple' });
+  await withTestServer(
+    async (baseUrl) => {
+      const beforeLogin = await sendRequest(baseUrl, '/api/auth/status');
+      assert.deepEqual(jsonBody(beforeLogin), {
+        schemaVersion: 1,
+        configured: true,
+        authenticated: false,
+      });
+
+      const denied = await sendRequest(baseUrl, '/api/auth/login', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ password: 'wrong password value' }),
+      });
+      assert.equal(denied.statusCode, 401);
+      assert.equal(denied.headers['set-cookie'], undefined);
+
+      const accepted = await sendRequest(baseUrl, '/api/auth/login', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ password: 'correct horse battery staple' }),
+      });
+      assert.equal(accepted.statusCode, 200);
+      const setCookie = accepted.headers['set-cookie'];
+      assert.ok(Array.isArray(setCookie));
+      assert.match(setCookie[0] ?? '', /^monster_hub_session=[a-f0-9]{64}; HttpOnly;/);
+      assert.match(setCookie[0] ?? '', /SameSite=Strict/);
+      const cookie = (setCookie[0] ?? '').split(';', 1)[0];
+
+      const authenticated = await sendRequest(baseUrl, '/api/auth/status', {
+        headers: { cookie },
+      });
+      assert.deepEqual(jsonBody(authenticated), {
+        schemaVersion: 1,
+        configured: true,
+        authenticated: true,
+      });
+
+      for (let attempt = 0; attempt < 5; attempt += 1) {
+        const failed = await sendRequest(baseUrl, '/api/auth/login', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ password: `another wrong password ${attempt}` }),
+        });
+        assert.equal(failed.statusCode, 401);
+      }
+      const limited = await sendRequest(baseUrl, '/api/auth/login', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ password: 'correct horse battery staple' }),
+      });
+      assert.equal(limited.statusCode, 429);
+      assert.equal(limited.headers['retry-after'], '900');
+    },
+    { auth },
+  );
 });
 
 test('serves a host-owned read-only agent status snapshot without probe details', async () => {

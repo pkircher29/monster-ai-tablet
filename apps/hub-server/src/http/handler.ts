@@ -12,6 +12,7 @@ import { DEFAULT_HUB_STATIC_DIRECTORY } from './paths.js';
 import { createServerOwnedAgentRegistry } from './registry.js';
 import { createDefaultAgentStatusProvider } from './status.js';
 import { createToolReconProvider } from '../recon/index.js';
+import type { HubAuth } from '../auth.js';
 import type { HubRequestHandlerOptions, ServerOwnedAgentRegistry } from './types.js';
 
 export const DEFAULT_HUB_BUDGET_CEILING_MICRODOLLARS = 400_000;
@@ -202,6 +203,82 @@ function isJsonContentType(request: IncomingMessage): boolean {
 function hasSupportedContentEncoding(request: IncomingMessage): boolean {
   const encoding = request.headers['content-encoding'];
   return encoding === undefined || encoding === 'identity';
+}
+
+function secureRequest(request: IncomingMessage): boolean {
+  return (
+    request.headers['x-forwarded-proto'] === 'https' ||
+    (request.socket as typeof request.socket & { readonly encrypted?: boolean }).encrypted === true
+  );
+}
+
+async function handleLogin(
+  request: IncomingMessage,
+  response: ServerResponse,
+  auth: HubAuth | undefined,
+): Promise<void> {
+  if (auth === undefined) {
+    sendJson(response, 503, errorBody('AUTH_NOT_CONFIGURED', 'Operator login is not configured.'));
+    request.resume();
+    return;
+  }
+  if (!isJsonContentType(request) || !hasSupportedContentEncoding(request)) {
+    sendJson(response, 415, errorBody('UNSUPPORTED_MEDIA_TYPE', 'Only UTF-8 JSON is accepted.'));
+    request.resume();
+    return;
+  }
+  let bodyResult: Awaited<ReturnType<typeof readBoundedBody>>;
+  try {
+    bodyResult = await readBoundedBody(request);
+  } catch {
+    sendJson(response, 400, errorBody('INVALID_JSON', 'The request body must be valid JSON.'));
+    return;
+  }
+  if (bodyResult.kind === 'TOO_LARGE') {
+    sendJson(response, 413, errorBody('REQUEST_BODY_TOO_LARGE', 'The request body is too large.'));
+    return;
+  }
+  let password: string;
+  try {
+    const parsed = JSON.parse(
+      new TextDecoder('utf-8', { fatal: true }).decode(bodyResult.body),
+    ) as unknown;
+    if (
+      typeof parsed !== 'object' ||
+      parsed === null ||
+      Array.isArray(parsed) ||
+      Object.keys(parsed).length !== 1 ||
+      !Object.hasOwn(parsed, 'password') ||
+      typeof (parsed as { readonly password?: unknown }).password !== 'string'
+    ) {
+      throw new TypeError('invalid login');
+    }
+    password = (parsed as { readonly password: string }).password;
+  } catch {
+    sendJson(response, 422, errorBody('INVALID_LOGIN', 'The login request is invalid.'));
+    return;
+  }
+  const result = auth.login(password, request.socket.remoteAddress ?? 'unknown');
+  if (result.kind === 'RATE_LIMITED') {
+    sendJson(response, 429, errorBody('LOGIN_RATE_LIMITED', 'Try again later.'), {
+      'retry-after': '900',
+    });
+    return;
+  }
+  if (result.kind === 'INVALID' || result.session === undefined) {
+    sendJson(response, 401, errorBody('INVALID_CREDENTIALS', 'The password is incorrect.'));
+    return;
+  }
+  sendJson(
+    response,
+    200,
+    {
+      schemaVersion: 1,
+      authenticated: true,
+      expiresAt: new Date(result.session.expiresAt).toISOString(),
+    },
+    { 'set-cookie': auth.sessionCookie(result.session, secureRequest(request)) },
+  );
 }
 
 async function readBoundedBody(
@@ -583,6 +660,7 @@ export function createHubRequestHandler(
   const agentStatusProvider =
     options.agentStatusProvider ?? createDefaultAgentStatusProvider(clock);
   const reconProvider = options.reconProvider ?? createToolReconProvider({ clock });
+  const auth = options.auth;
   const assignmentQueue = new Map<string, unknown>();
 
   return async (request, response) => {
@@ -618,6 +696,53 @@ export function createHubRequestHandler(
           mode: 'ASSIGNMENT_QUEUE',
           schemaVersion: 1,
         });
+        return;
+      }
+
+      if (path === '/api/auth/status') {
+        if (request.method !== 'GET') {
+          sendJson(response, 405, errorBody('METHOD_NOT_ALLOWED', 'This route requires GET.'), {
+            allow: 'GET',
+          });
+          request.resume();
+          return;
+        }
+        sendJson(response, 200, {
+          schemaVersion: 1,
+          configured: auth !== undefined,
+          authenticated: auth?.authenticate(request.headers.cookie) !== null && auth !== undefined,
+        });
+        return;
+      }
+
+      if (path === '/api/auth/login') {
+        if (request.method !== 'POST') {
+          sendJson(response, 405, errorBody('METHOD_NOT_ALLOWED', 'This route requires POST.'), {
+            allow: 'POST',
+          });
+          request.resume();
+          return;
+        }
+        await handleLogin(request, response, auth);
+        return;
+      }
+
+      if (path === '/api/auth/logout') {
+        if (request.method !== 'POST') {
+          sendJson(response, 405, errorBody('METHOD_NOT_ALLOWED', 'This route requires POST.'), {
+            allow: 'POST',
+          });
+          request.resume();
+          return;
+        }
+        auth?.logout(request.headers.cookie);
+        sendJson(
+          response,
+          200,
+          { schemaVersion: 1, authenticated: false },
+          auth === undefined ? {} : { 'set-cookie': auth.clearCookie(secureRequest(request)) },
+        );
+        request.resume();
         return;
       }
 

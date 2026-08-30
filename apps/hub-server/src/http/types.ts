@@ -1,6 +1,7 @@
 import type { Server } from 'node:http';
 
 import type { DelegationPreviewRegistry } from '../types.js';
+import type { HubAuth } from '../auth.js';
 
 export type AgentEvidenceProvenance =
   'VERIFIED_HOST_INVENTORY' | 'DOCUMENTED_COMPATIBILITY' | 'BENCHMARK_RESULT';
@@ -78,6 +79,7 @@ export interface HubRequestHandlerOptions {
   readonly agentRegistry?: ServerOwnedAgentRegistry;
   readonly agentStatusProvider?: AgentStatusProvider;
   readonly reconProvider?: ReconProvider;
+  readonly auth?: HubAuth;
 }
 
 export interface HubServerOptions extends HubRequestHandlerOptions {
