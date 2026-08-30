@@ -1,6 +1,8 @@
 # Monster Agent Hub server
 
-The hub server is a local, preview-only HTTP host. It serves the built tablet PWA and creates reviewable delegation plans; it does not launch agents, call models, read credentials, push, deploy, purchase, message, or run ADB.
+The hub server serves the tablet PWA, creates reviewable delegation plans, and brokers the complete
+vendored AI-Spy operator console. AI-Spy runs as a loopback-only child and is reachable only through
+the authenticated hub proxy. Execution-capable routes require a one-use approval.
 
 ## Start
 
@@ -12,7 +14,11 @@ npm run build --workspace @monster-agent-hub/hub-server
 npm start --workspace @monster-agent-hub/hub-server
 ```
 
-The default listener is `127.0.0.1:8787`. `MONSTER_HUB_HOST` and `MONSTER_HUB_PORT` explicitly override the bind address and port. Keep the listener on loopback when placing it behind Tailscale Serve; a non-loopback bind expands who can reach the unauthenticated preview surface.
+Before starting, create `.monster-hub/admin-password.txt` at the repository root with one 14–256
+character password. `MONSTER_HUB_ADMIN_PASSWORD_FILE` can point to another local file. Passwords,
+session tokens, internal bridge tokens, and audit files must not be committed.
+
+The default listener is `127.0.0.1:8787`. `MONSTER_HUB_HOST` and `MONSTER_HUB_PORT` explicitly override the bind address and port. Keep the listener on loopback when placing it behind Tailscale Serve.
 
 `SIGINT` and `SIGTERM` stop accepting requests, close idle connections, and allow active requests five seconds to finish before their sockets are closed. Repeated shutdown requests share the same in-flight shutdown operation.
 
@@ -24,7 +30,7 @@ The default listener is `127.0.0.1:8787`. `MONSTER_HUB_HOST` and `MONSTER_HUB_PO
 {
   "status": "ok",
   "service": "monster-agent-hub",
-  "mode": "PREVIEW_ONLY",
+  "mode": "ASSIGNMENT_QUEUE",
   "schemaVersion": 1
 }
 ```
@@ -59,6 +65,12 @@ Success returns the `DelegationPreview` contract. Every error uses one stable en
 ```
 
 Cross-site API requests are rejected and no permissive CORS header is emitted. Fetch Metadata must be absent, `same-origin`, or `none`; contradictory or unknown site classifications fail closed. The request body is capped at 8 KiB, and the entire `/api` namespace is reserved for API responses rather than the SPA fallback.
+
+`GET /ai-spy/` serves the full console. `/api/ai-spy/*` requires an authenticated HttpOnly session.
+Read-only calls are proxied to the fixed child origin; execution and administrative calls return an
+approval challenge. A confirmed challenge yields a two-minute token usable once for that exact
+method, path, query, and body. Key operations, skill deployment, directives, model changes, and LAN
+scans require the stronger `AUTHORIZE ADMIN ACTION` phrase.
 
 ## Static PWA
 

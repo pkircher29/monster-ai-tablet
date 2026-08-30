@@ -31,7 +31,10 @@ export async function loadHubLocalConfiguration(
   if (
     adminPassword.length < 14 ||
     adminPassword.length > 256 ||
-    /[\u0000-\u001f\u007f]/.test(adminPassword)
+    [...adminPassword].some((character) => {
+      const codePoint = character.codePointAt(0)!;
+      return codePoint <= 0x1f || codePoint === 0x7f;
+    })
   ) {
     throw new TypeError('Monster Hub admin password file must contain one safe password');
   }

@@ -1,8 +1,8 @@
 # Monster Agent Hub
 
 Monster Agent Hub is a local-first control surface for the Android coding tablet and its trusted
-Windows host. The current milestone provides reviewable delegation plus an explicit local
-assignment queue; it does not launch commands or authorize external actions.
+Windows host. Version 0.2 adds the complete AI-Spy console as an isolated, authenticated operator
+surface while retaining the hub's reviewable delegation and explicit assignment queue.
 
 ## Workspace layout
 
@@ -38,7 +38,11 @@ npm run format:check
 The root commands automatically include workspace scripts as each application or package gains
 an implementation.
 
-## Current assignment milestone
+The launcher requires one local password file. Create `.monster-hub/admin-password.txt` with one
+14–256 character password, or point `MONSTER_HUB_ADMIN_PASSWORD_FILE` at another local file. The
+directory is git-ignored; never commit the password.
+
+## Version 0.2
 
 - A touch-first installable PWA lists Hermes, Codex, Claude Code, OpenClaw, and Antigravity with
   explicit **Best for** and **Do not use for** guidance.
@@ -47,8 +51,15 @@ an implementation.
   supervised desktop-only tool.
 - Closed status snapshots are retained in a capped local SQLite history on the Windows host, so
   availability evidence survives a hub restart without storing raw probe output.
-- A bounded AI-Spy-derived reconnaissance panel detects a fixed catalog of host tools without
-  returning paths, commands, credentials, recursive file scans, or network-scan data.
+- A bounded reconnaissance card provides a safe summary, while **Open full AI-Spy console** exposes
+  analytics, inventory, usage, network maps, Hermes status, Agora, skills, chat, consensus,
+  benchmarks, orchestration, agent controls, keyring, directives, budgets, and model controls.
+- AI-Spy runs as a separate loopback-only child with a random per-launch internal token. The child
+  cannot be reached through the hub without an authenticated operator session.
+- Read-only console requests require login. Execution and administrative requests require a second,
+  exact, single-use approval bound to the session, HTTP method, path, query, and request body.
+- Approval decisions and forwarded route/status metadata are appended to the git-ignored
+  `.monster-hub/audit.jsonl`; prompts, key values, request bodies, passwords, and tokens are omitted.
 - A host-owned registry decomposes an objective into research, implementation, verification, and
   review work, then returns versioned agent/model/tool assignments with evidence and cost bounds.
 - The OpenRouter adapter is exact-model, no-tools by default, secret-safe, and budget-reserved. No
@@ -68,8 +79,7 @@ verification after the temporary test listeners are stopped.
 ## Security boundary
 
 Credentials and provider tokens belong on the trusted host, not in the tablet browser or source
-control. Probe output, command lines, paths, identities, and credentials are never returned by the
-status or reconnaissance APIs. The HTTP surface is loopback-only behind Tailscale; assignment only
-writes to a bounded in-memory queue and has no command-execution route. Authentication is still
-required before any execution-capable API can be added. See
-[`tasks/plan.md`](tasks/plan.md) for the full architecture and delivery phases.
+control. The HTTP surface and AI-Spy child are loopback-only behind private Tailscale Serve; Funnel
+is disabled. Sessions are HttpOnly and rate-limited. High-impact AI-Spy calls are disabled until the
+operator completes a separate one-use approval. No purchase, public post, message, ADB action, or
+other external side effect is implied merely by opening the console.

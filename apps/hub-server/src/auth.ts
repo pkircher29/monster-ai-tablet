@@ -46,7 +46,14 @@ function cookieValue(cookieHeader: string | undefined): string | null {
 }
 
 function assertPassword(password: string): void {
-  if (password.length < 14 || password.length > 256 || /[\u0000-\u001f\u007f]/.test(password)) {
+  if (
+    password.length < 14 ||
+    password.length > 256 ||
+    [...password].some((character) => {
+      const codePoint = character.codePointAt(0)!;
+      return codePoint <= 0x1f || codePoint === 0x7f;
+    })
+  ) {
     throw new TypeError('Monster Hub admin password must be 14 to 256 safe characters');
   }
 }

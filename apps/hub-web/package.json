@@ -1,6 +1,6 @@
 {
   "name": "@monster-agent-hub/hub-web",
-  "version": "0.0.0",
+  "version": "0.2.0",
   "private": true,
   "description": "Tablet-friendly interface for Monster Agent Hub.",
   "type": "module",

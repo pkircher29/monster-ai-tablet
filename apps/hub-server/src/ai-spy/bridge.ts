@@ -28,7 +28,11 @@ function boundedPort(value: number): number {
   return value;
 }
 
-async function waitForHealth(origin: URL, internalToken: string, child: ChildProcess): Promise<void> {
+async function waitForHealth(
+  origin: URL,
+  internalToken: string,
+  child: ChildProcess,
+): Promise<void> {
   const deadline = Date.now() + STARTUP_TIMEOUT_MS;
   while (Date.now() < deadline) {
     if (child.exitCode !== null) throw new Error('AI-Spy child exited during startup');
@@ -57,9 +61,7 @@ async function stopChild(child: ChildProcess): Promise<void> {
   if (child.exitCode === null) child.kill('SIGKILL');
 }
 
-export async function startAiSpyBridge(
-  options: AiSpyBridgeOptions = {},
-): Promise<AiSpyBridge> {
+export async function startAiSpyBridge(options: AiSpyBridgeOptions = {}): Promise<AiSpyBridge> {
   const repositoryRoot = resolve(options.repositoryRoot ?? DEFAULT_REPOSITORY_ROOT);
   const vendorDirectory = resolve(repositoryRoot, 'vendor', 'ai-spy');
   const serverPath = resolve(vendorDirectory, 'server.mjs');
