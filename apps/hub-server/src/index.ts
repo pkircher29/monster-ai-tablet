@@ -46,6 +46,8 @@ export { createAiSpyProxy } from './ai-spy/proxy.js';
 export type { AiSpyProxy, AiSpyProxyOptions, AiSpyProxyResult } from './ai-spy/proxy.js';
 export { createHubAuth } from './auth.js';
 export type { HubAuth, HubAuthOptions, HubAuthSession, HubLoginResult } from './auth.js';
+export { loadHubLocalConfiguration } from './configuration.js';
+export type { HubLocalConfiguration } from './configuration.js';
 export { createOpenRouterAdapter, OpenRouterAdapterError } from './providers/openrouter/index.js';
 export type {
   AtomicReservationLedger,

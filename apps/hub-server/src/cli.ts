@@ -7,6 +7,10 @@ import {
   startHubServer,
   stopHubServer,
 } from './http/server.js';
+import { createHubAuth } from './auth.js';
+import { startAiSpyBridge } from './ai-spy/bridge.js';
+import { createAiSpyProxy } from './ai-spy/proxy.js';
+import { loadHubLocalConfiguration } from './configuration.js';
 
 function configuredPort(raw: string | undefined): number {
   if (raw === undefined) {
@@ -25,7 +29,24 @@ function configuredPort(raw: string | undefined): number {
 export async function runHubCli(): Promise<void> {
   const host = process.env.MONSTER_HUB_HOST ?? DEFAULT_HUB_HOST;
   const port = configuredPort(process.env.MONSTER_HUB_PORT);
-  const started = await startHubServer({ host, port });
+  const configuration = await loadHubLocalConfiguration();
+  const auth = createHubAuth({ password: configuration.adminPassword });
+  const aiSpy = await startAiSpyBridge();
+  let started: Awaited<ReturnType<typeof startHubServer>>;
+  try {
+    started = await startHubServer({
+      host,
+      port,
+      auth,
+      aiSpyProxy: createAiSpyProxy({
+        origin: aiSpy.origin,
+        internalToken: aiSpy.internalToken,
+      }),
+    });
+  } catch (error) {
+    await aiSpy.stop();
+    throw error;
+  }
   process.stdout.write(`Monster Agent Hub listening on ${started.url.origin}\n`);
 
   let closing = false;
@@ -34,7 +55,7 @@ export async function runHubCli(): Promise<void> {
       return;
     }
     closing = true;
-    void stopHubServer(started.server).then(
+    void Promise.all([stopHubServer(started.server), aiSpy.stop()]).then(
       () => {
         process.exitCode = 0;
       },
