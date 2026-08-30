@@ -10,6 +10,8 @@ const MAX_PROXY_REQUEST_BYTES = 256 * 1_024;
 const MAX_PROXY_RESPONSE_BYTES = 8 * 1_024 * 1_024;
 const APPROVAL_CHALLENGE_TTL_MS = 5 * 60_000;
 const APPROVAL_TOKEN_TTL_MS = 2 * 60_000;
+const AI_SPY_DOCUMENT_CSP =
+  "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'";
 const DEFAULT_REPOSITORY_ROOT = resolve(fileURLToPath(new URL('../../../..', import.meta.url)));
 
 export interface AiSpyProxyResult {
@@ -338,6 +340,10 @@ export function createAiSpyProxy(options: AiSpyProxyOptions): AiSpyProxy {
             ? 'no-store'
             : (upstream.headers.get('cache-control') ?? 'no-cache'),
           body: responseBody,
+          ...(target.pathname === '/' &&
+          upstream.headers.get('content-type')?.startsWith('text/html')
+            ? { extraHeaders: { 'content-security-policy': AI_SPY_DOCUMENT_CSP } }
+            : {}),
         };
       } catch {
         if (apiRequest && session !== null)

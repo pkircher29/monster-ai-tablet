@@ -91,6 +91,15 @@ test('AI-Spy proxy authenticates data and binds one-shot approvals without leaki
     const shell = await send(hub.url, '/ai-spy/');
     assert.equal(shell.statusCode, 200);
     assert.match(shell.body.toString('utf8'), /isolated console/);
+    assert.match(
+      String(shell.headers['content-security-policy']),
+      /style-src 'self' 'unsafe-inline'/,
+    );
+    assert.match(String(shell.headers['content-security-policy']), /script-src 'self';/);
+    assert.doesNotMatch(
+      String(shell.headers['content-security-policy']),
+      /script-src[^;]*unsafe-inline/,
+    );
 
     const denied = await send(hub.url, '/api/ai-spy/snapshot');
     assert.equal(denied.statusCode, 401);

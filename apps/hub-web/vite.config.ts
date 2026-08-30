@@ -39,6 +39,7 @@ export default defineConfig({
         cleanupOutdatedCaches: true,
         globPatterns: ['**/*.{css,html,js,svg,woff2}'],
         navigateFallback: 'index.html',
+        navigateFallbackDenylist: [/^\/ai-spy(?:\/|$)/, /^\/api(?:\/|$)/],
       },
     }),
   ],

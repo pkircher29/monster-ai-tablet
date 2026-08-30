@@ -4,13 +4,48 @@ import { Socket } from 'node:net';
 
 // Known agent/runtime services keyed by listening port. identify = HTTP path that returns a model list.
 const AGENT_PORTS = {
-  11434: { tool: 'Ollama',              kind: 'local-llm', identify: '/api/tags',   parse: (j) => (j.models || []).map(m => m.name) },
-  1234:  { tool: 'LM Studio',           kind: 'local-llm', identify: '/v1/models',  parse: (j) => (j.data || []).map(m => m.id) },
-  8080:  { tool: 'Open WebUI',          kind: 'ui',        identify: '/api/models', parse: (j) => (j.data || []).map(m => m.id) },
-  5000:  { tool: 'text-generation-webui', kind: 'local-llm', identify: '/v1/models', parse: (j) => (j.data || []).map(m => m.id) },
-  1337:  { tool: 'Jan',                 kind: 'local-llm', identify: '/v1/models',  parse: (j) => (j.data || []).map(m => m.id) },
-  5001:  { tool: 'KoboldCpp',           kind: 'local-llm', identify: '/v1/models',  parse: (j) => (j.data || []).map(m => m.id) },
-  8000:  { tool: 'vLLM / LocalAI',      kind: 'local-llm', identify: '/v1/models',  parse: (j) => (j.data || []).map(m => m.id) },
+  11434: {
+    tool: 'Ollama',
+    kind: 'local-llm',
+    identify: '/api/tags',
+    parse: (j) => (j.models || []).map((m) => m.name),
+  },
+  1234: {
+    tool: 'LM Studio',
+    kind: 'local-llm',
+    identify: '/v1/models',
+    parse: (j) => (j.data || []).map((m) => m.id),
+  },
+  8080: {
+    tool: 'Open WebUI',
+    kind: 'ui',
+    identify: '/api/models',
+    parse: (j) => (j.data || []).map((m) => m.id),
+  },
+  5000: {
+    tool: 'text-generation-webui',
+    kind: 'local-llm',
+    identify: '/v1/models',
+    parse: (j) => (j.data || []).map((m) => m.id),
+  },
+  1337: {
+    tool: 'Jan',
+    kind: 'local-llm',
+    identify: '/v1/models',
+    parse: (j) => (j.data || []).map((m) => m.id),
+  },
+  5001: {
+    tool: 'KoboldCpp',
+    kind: 'local-llm',
+    identify: '/v1/models',
+    parse: (j) => (j.data || []).map((m) => m.id),
+  },
+  8000: {
+    tool: 'vLLM / LocalAI',
+    kind: 'local-llm',
+    identify: '/v1/models',
+    parse: (j) => (j.data || []).map((m) => m.id),
+  },
 };
 
 export function localIPs() {
@@ -28,32 +63,49 @@ export function localIPs() {
 
 export function tailscalePeers() {
   try {
-    const r = spawnSync('tailscale', ['status', '--json'], { encoding: 'utf8', timeout: 8000, shell: process.platform === 'win32' });
+    const r = spawnSync('tailscale', ['status', '--json'], {
+      encoding: 'utf8',
+      timeout: 8000,
+      shell: false,
+    });
     if (r.status !== 0) return [];
     const j = JSON.parse(r.stdout);
     const peers = [];
-    const add = (p, self) => peers.push({
-      ip: (p.TailscaleIPs || [])[0] || null,
-      host: p.HostName || p.DNSName?.split('.')[0] || '?',
-      os: p.OS, online: self ? true : !!p.Online, self,
-      lastSeen: p.LastSeen || null,
-    });
+    const add = (p, self) =>
+      peers.push({
+        ip: (p.TailscaleIPs || [])[0] || null,
+        host: p.HostName || p.DNSName?.split('.')[0] || '?',
+        os: p.OS,
+        online: self ? true : !!p.Online,
+        self,
+        lastSeen: p.LastSeen || null,
+      });
     if (j.Self) add(j.Self, true);
     for (const p of Object.values(j.Peer || {})) add(p, false);
     return peers;
-  } catch { return []; }
+  } catch {
+    return [];
+  }
 }
 
 export function localListeners() {
   if (process.platform === 'win32') {
     const ps = `Get-NetTCPConnection -State Listen | Where-Object { $_.LocalPort -lt 49500 } | ForEach-Object { $p = (Get-Process -Id $_.OwningProcess -ErrorAction SilentlyContinue).ProcessName; "$($_.LocalPort)|$($_.LocalAddress)|$p" } | Sort-Object -Unique`;
     try {
-      const r = spawnSync('powershell', ['-NoProfile', '-Command', ps], { encoding: 'utf8', timeout: 12000 });
-      return (r.stdout || '').split(/\r?\n/).filter(Boolean).map(l => {
-        const [port, addr, proc] = l.split('|');
-        return { port: +port, addr, proc };
+      const r = spawnSync('powershell', ['-NoProfile', '-Command', ps], {
+        encoding: 'utf8',
+        timeout: 12000,
       });
-    } catch { return []; }
+      return (r.stdout || '')
+        .split(/\r?\n/)
+        .filter(Boolean)
+        .map((l) => {
+          const [port, addr, proc] = l.split('|');
+          return { port: +port, addr, proc };
+        });
+    } catch {
+      return [];
+    }
   } else {
     // Linux / POSIX: parse ss -tlpn
     try {
@@ -79,7 +131,9 @@ export function localListeners() {
         }
       }
       return listeners;
-    } catch { return []; }
+    } catch {
+      return [];
+    }
   }
 }
 
@@ -87,7 +141,15 @@ export function tcpOpen(host, port, timeout = 1500) {
   return new Promise((resolve) => {
     const s = new Socket();
     let done = false;
-    const finish = (v) => { if (!done) { done = true; try { s.destroy(); } catch {} resolve(v); } };
+    const finish = (v) => {
+      if (!done) {
+        done = true;
+        try {
+          s.destroy();
+        } catch {}
+        resolve(v);
+      }
+    };
     s.setTimeout(timeout);
     s.once('connect', () => finish(true));
     s.once('timeout', () => finish(false));
@@ -104,20 +166,35 @@ export async function identify(host, port) {
     const r = await fetch(`http://${host}:${port}${spec.identify}`, { signal: ctrl });
     if (!r.ok) return { models: [], ok: false, status: r.status };
     const ct = r.headers.get('content-type') || '';
-    if (ct.includes('json')) { const j = await r.json(); return { models: spec.parse(j), ok: true }; }
+    if (ct.includes('json')) {
+      const j = await r.json();
+      return { models: spec.parse(j), ok: true };
+    }
     return { models: [], ok: true };
-  } catch { return { models: [], ok: false }; }
+  } catch {
+    return { models: [], ok: false };
+  }
 }
 
 export async function scanHost(ip, label) {
   const services = [];
-  await Promise.all(Object.keys(AGENT_PORTS).map(async (portStr) => {
-    const port = +portStr;
-    if (!(await tcpOpen(ip, port))) return;
-    const spec = AGENT_PORTS[port];
-    const info = await identify(ip, port);
-    services.push({ host: label, ip, port, tool: spec.tool, kind: spec.kind, reachable: info.ok, models: info.models });
-  }));
+  await Promise.all(
+    Object.keys(AGENT_PORTS).map(async (portStr) => {
+      const port = +portStr;
+      if (!(await tcpOpen(ip, port))) return;
+      const spec = AGENT_PORTS[port];
+      const info = await identify(ip, port);
+      services.push({
+        host: label,
+        ip,
+        port,
+        tool: spec.tool,
+        kind: spec.kind,
+        reachable: info.ok,
+        models: info.models,
+      });
+    }),
+  );
   return services;
 }
 
@@ -130,18 +207,33 @@ export async function buildNetwork({ lanScan = false } = {}) {
 
   const self = await scanHost('127.0.0.1', 'this-machine');
   for (const s of self) {
-    agents.push({ ...s, node: 'this-machine', lanIP: ips.lan, tailscaleIP: ips.tailscale, self: true });
+    agents.push({
+      ...s,
+      node: 'this-machine',
+      lanIP: ips.lan,
+      tailscaleIP: ips.tailscale,
+      self: true,
+    });
   }
 
-  const onlinePeers = peers.filter(p => !p.self && p.online && p.ip);
-  const peerResults = await Promise.all(onlinePeers.map(p => scanHost(p.ip, p.host)));
+  const onlinePeers = peers.filter((p) => !p.self && p.online && p.ip);
+  const peerResults = await Promise.all(onlinePeers.map((p) => scanHost(p.ip, p.host)));
   peerResults.forEach((svcs, i) => {
-    for (const s of svcs) agents.push({ ...s, node: onlinePeers[i].host, lanIP: null, tailscaleIP: onlinePeers[i].ip, self: false });
+    for (const s of svcs)
+      agents.push({
+        ...s,
+        node: onlinePeers[i].host,
+        lanIP: null,
+        tailscaleIP: onlinePeers[i].ip,
+        self: false,
+      });
   });
 
   if (lanScan && ips.lan) {
     const base = ips.lan.split('.').slice(0, 3).join('.');
-    const hosts = Array.from({ length: 254 }, (_, i) => `${base}.${i + 1}`).filter(h => h !== ips.lan);
+    const hosts = Array.from({ length: 254 }, (_, i) => `${base}.${i + 1}`).filter(
+      (h) => h !== ips.lan,
+    );
     const ports = [11434, 1234, 3030];
     const hits = [];
     const queue = [...hosts];
@@ -149,7 +241,10 @@ export async function buildNetwork({ lanScan = false } = {}) {
       while (queue.length) {
         const h = queue.shift();
         for (const port of ports) {
-          if (await tcpOpen(h, port, 700)) { hits.push({ ip: h, port }); break; }
+          if (await tcpOpen(h, port, 700)) {
+            hits.push({ ip: h, port });
+            break;
+          }
         }
       }
     }
@@ -157,17 +252,30 @@ export async function buildNetwork({ lanScan = false } = {}) {
     for (const hit of hits) {
       const info = await identify(hit.ip, hit.port);
       const spec = AGENT_PORTS[hit.port];
-      agents.push({ node: hit.ip, ip: hit.ip, port: hit.port, tool: spec.tool, kind: spec.kind, reachable: info.ok, models: info.models, lanIP: hit.ip, tailscaleIP: null, self: false });
+      agents.push({
+        node: hit.ip,
+        ip: hit.ip,
+        port: hit.port,
+        tool: spec.tool,
+        kind: spec.kind,
+        reachable: info.ok,
+        models: info.models,
+        lanIP: hit.ip,
+        tailscaleIP: null,
+        self: false,
+      });
     }
   }
 
   const knownPorts = new Set(Object.keys(AGENT_PORTS).map(Number));
-  const otherExposed = listeners.filter(l => !knownPorts.has(l.port) && l.proc && !['System', 'svchost', 'Idle'].includes(l.proc));
+  const otherExposed = listeners.filter(
+    (l) => !knownPorts.has(l.port) && l.proc && !['System', 'svchost', 'Idle'].includes(l.proc),
+  );
 
   return {
     generatedAt: new Date().toISOString(),
     localIPs: ips,
-    tailscale: { peers, online: peers.filter(p => p.online).length, total: peers.length },
+    tailscale: { peers, online: peers.filter((p) => p.online).length, total: peers.length },
     agents,
     otherExposed,
     lanScanned: lanScan,

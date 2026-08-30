@@ -49,6 +49,34 @@ function setLive(ok) {
   label.textContent = ok === true ? 'LIVE' : ok === false ? 'OFFLINE' : 'SYNCING';
 }
 
+let operatorLoginPromise = null;
+
+async function ensureOperatorLogin() {
+  if (operatorLoginPromise) return operatorLoginPromise;
+  operatorLoginPromise = (async () => {
+    const password = window.prompt('Monster Hub operator password');
+    if (!password) throw new Error('Operator login cancelled');
+    const login = await fetch('/api/auth/login', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      credentials: 'same-origin',
+      body: JSON.stringify({ password }),
+    });
+    if (!login.ok) {
+      throw new Error(
+        login.status === 429
+          ? 'Too many login attempts; try again later.'
+          : 'Operator login failed.',
+      );
+    }
+  })();
+  try {
+    await operatorLoginPromise;
+  } finally {
+    operatorLoginPromise = null;
+  }
+}
+
 async function api(path, opts) {
   const routedPath = path.startsWith('/api/') ? '/api/ai-spy/' + path.slice('/api/'.length) : path;
   let approvalToken = '';
@@ -61,20 +89,7 @@ async function api(path, opts) {
     if (r.ok || r.status === 202) return r.json();
     const detail = await r.json().catch(() => ({}));
     if (r.status === 401 && attempt === 0) {
-      const password = window.prompt('Monster Hub operator password');
-      if (!password) throw new Error('Operator login cancelled');
-      const login = await fetch('/api/auth/login', {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        credentials: 'same-origin',
-        body: JSON.stringify({ password }),
-      });
-      if (!login.ok)
-        throw new Error(
-          login.status === 429
-            ? 'Too many login attempts; try again later.'
-            : 'Operator login failed.',
-        );
+      await ensureOperatorLogin();
       continue;
     }
     if (r.status === 428 && detail.approvalId && detail.confirmationPhrase) {
@@ -2230,7 +2245,7 @@ async function loadAll({ refresh = false } = {}) {
     render();
   } catch (e) {
     setLive(false);
-    main.innerHTML = `<div class="alert">Server unreachable: ${esc(e.message)}. Start it with <code>node server.mjs</code>.</div>`;
+    main.innerHTML = `<div class="alert">Console unavailable: ${esc(e.message)}. Return to Monster Agent Hub and retry.</div>`;
   }
 }
 
@@ -2252,7 +2267,18 @@ $('#lite-btn')?.addEventListener('click', () =>
 applyLite(localStorage.getItem('agentos-lite') === '1');
 
 window.addEventListener('hashchange', render);
-loadAll();
+async function bootstrap() {
+  try {
+    const status = await fetch('/api/auth/status', { credentials: 'same-origin' });
+    if (!status.ok) throw new Error('Operator login status is unavailable');
+    if (!(await status.json()).authenticated) await ensureOperatorLogin();
+    await loadAll();
+  } catch (error) {
+    setLive(false);
+    main.innerHTML = `<div class="alert">Console unavailable: ${esc(error.message)}. Return to Monster Agent Hub and retry.</div>`;
+  }
+}
+bootstrap();
 setInterval(
   () => {
     // don't clobber the page while typing, or while an orchestration job is live
