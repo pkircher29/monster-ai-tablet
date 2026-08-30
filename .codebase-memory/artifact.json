@@ -1,11 +1,11 @@
 {
     "schema_version": 2,
-    "commit": "HEAD",
-    "indexed_at": "2026-08-30T07:36:00Z",
+    "commit": "4ad0f246629a755cd947108b6e92e9503cb17e50",
+    "indexed_at": "2026-08-30T08:10:37Z",
     "project": "C-Users-Paul-GITHUB-monster-ai-tablet-final",
-    "nodes": 589,
-    "edges": 1418,
-    "original_size": 3932160,
-    "compressed_size": 535367,
+    "nodes": 645,
+    "edges": 1561,
+    "original_size": 4063232,
+    "compressed_size": 575871,
     "compression_level": 3
 }

@@ -4,7 +4,13 @@ import axe from 'axe-core';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { App } from './App';
-import { HubApiError, type DelegationPreviewRequester, type DelegationPreviewSummary } from './api';
+import {
+  HubApiError,
+  type AgentStatusRequester,
+  type AgentStatusSnapshot,
+  type DelegationPreviewRequester,
+  type DelegationPreviewSummary,
+} from './api';
 
 const SERVER_PREVIEW: DelegationPreviewSummary = {
   objective: 'Audit the tablet hub, fix the accessibility issues, and verify the release.',
@@ -51,6 +57,29 @@ const SERVER_PREVIEW: DelegationPreviewSummary = {
   estimatedTotalCostMicrodollars: 100_000,
 };
 
+const LIVE_AGENT_STATUS: AgentStatusSnapshot = {
+  schemaVersion: 1,
+  mode: 'READ_ONLY',
+  observedAt: '2026-08-30T12:00:00.000Z',
+  agents: [
+    { id: 'hermes', state: 'READY', statusCode: 'AVAILABLE', version: '0.20.5' },
+    { id: 'codex', state: 'READY', statusCode: 'AUTHENTICATED', version: '0.150.1' },
+    {
+      id: 'claude-code',
+      state: 'READY',
+      statusCode: 'AUTHENTICATED',
+      version: '2.1.251',
+    },
+    { id: 'openclaw', state: 'READY', statusCode: 'AVAILABLE', version: '2026.7.1-2' },
+    {
+      id: 'antigravity',
+      state: 'UNSUPPORTED',
+      statusCode: 'DESKTOP_ONLY',
+      version: null,
+    },
+  ],
+};
+
 function deferred<T>() {
   let resolve!: (value: T) => void;
   let reject!: (reason?: unknown) => void;
@@ -83,6 +112,27 @@ afterEach(() => {
 });
 
 describe('Monster Agent Hub tablet shell', () => {
+  it('replaces declared availability with the trusted host status without exposing diagnostics', async () => {
+    const statusRequester = vi.fn<AgentStatusRequester>().mockResolvedValue(LIVE_AGENT_STATUS);
+    render(<App connectionState="online" agentStatusRequester={statusRequester} />);
+
+    const rack = screen.getByRole('region', { name: 'Agent rack' });
+    const codexCard = within(rack)
+      .getByRole('heading', { level: 3, name: 'Codex' })
+      .closest('article') as HTMLElement;
+    expect(await within(codexCard).findByText('Ready')).toBeInTheDocument();
+    expect(
+      within(codexCard).getByText('Installed and authenticated on trusted host.'),
+    ).toBeInTheDocument();
+    expect(within(codexCard).getByText('0.150.1')).toBeInTheDocument();
+    expect(screen.getByText('Agents verified')).toBeInTheDocument();
+    expect(screen.getByText('Host status verified · no execution')).toBeInTheDocument();
+    expect(document.body).not.toHaveTextContent('private@example.test');
+    expect(statusRequester).toHaveBeenCalledWith(
+      expect.objectContaining({ signal: expect.any(AbortSignal) }),
+    );
+  });
+
   it('presents the dispatch landmarks and all five manifest-shaped agent modules', () => {
     render(<App connectionState="offline" />);
 
@@ -111,7 +161,7 @@ describe('Monster Agent Hub tablet shell', () => {
     expect(within(openClawCard as HTMLElement).getByText('Ready')).toBeInTheDocument();
     expect(
       within(openClawCard as HTMLElement).getByText(
-        'Gateway online; tablet node 1/1 with no operator.admin scope.',
+        'Live gateway status is checked when the trusted host is online.',
       ),
     ).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'OpenClaw connected' })).toBeDisabled();

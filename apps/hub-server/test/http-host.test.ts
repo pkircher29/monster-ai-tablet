@@ -196,6 +196,77 @@ test('serves a minimal health response with same-origin security headers', async
   });
 });
 
+test('serves a host-owned read-only agent status snapshot without probe details', async () => {
+  const observedAt = new Date(Date.now() - 1_000).toISOString();
+  const snapshot = {
+    schemaVersion: 1,
+    mode: 'READ_ONLY',
+    observedAt,
+    agents: [
+      {
+        id: 'hermes',
+        state: 'READY',
+        statusCode: 'AUTHENTICATED',
+        version: '0.20.5',
+      },
+      {
+        id: 'codex',
+        state: 'READY',
+        statusCode: 'AUTHENTICATED',
+        version: '0.150.1',
+      },
+      {
+        id: 'claude-code',
+        state: 'READY',
+        statusCode: 'AUTHENTICATED',
+        version: '2.1.251',
+      },
+      {
+        id: 'openclaw',
+        state: 'READY',
+        statusCode: 'CONNECTED',
+        version: '2026.7.1-2',
+      },
+      {
+        id: 'antigravity',
+        state: 'UNSUPPORTED',
+        statusCode: 'DESKTOP_ONLY',
+        version: null,
+      },
+    ],
+  } as const;
+  let providerCalls = 0;
+  const started = await startHubServer({
+    host: '127.0.0.1',
+    port: 0,
+    staticDirectory,
+    agentStatusProvider: async () => {
+      providerCalls += 1;
+      return snapshot;
+    },
+  });
+  try {
+    const response = await sendRequest(started.url, '/api/agents/status');
+
+    assert.equal(response.statusCode, 200);
+    assert.deepEqual(jsonBody(response), snapshot);
+    assert.equal(providerCalls, 1);
+    assert.equal(response.headers['cache-control'], 'no-store');
+    assert.doesNotMatch(
+      response.body.toString('utf8').toLowerCase(),
+      /commandline|executable|email|orgid|path|stderr|stdout|token|secret/,
+    );
+
+    const wrongMethod = await sendRequest(started.url, '/api/agents/status', {
+      method: 'POST',
+    });
+    assert.equal(wrongMethod.statusCode, 405);
+    assert.equal(wrongMethod.headers.allow, 'GET');
+  } finally {
+    await stopHubServer(started.server);
+  }
+});
+
 test('injects host-owned identity, time, limits, registry, and provenance into a preview', async () => {
   const now = new Date(Date.now() - 1_000);
   await withTestServer(

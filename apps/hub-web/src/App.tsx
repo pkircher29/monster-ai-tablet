@@ -3,7 +3,13 @@ import type { FormEvent, KeyboardEvent } from 'react';
 
 import {
   HubApiError,
+  requestAgentStatus,
   requestDelegationPreview,
+  type AgentRuntimeStatus,
+  type AgentId,
+  type AgentStatusCode,
+  type AgentStatusRequester,
+  type AgentStatusSnapshot,
   type DelegationPreviewRequester,
   type DelegationPreviewSummary,
 } from './api';
@@ -14,10 +20,11 @@ type AgentState = 'ready' | 'degraded' | 'offline' | 'unsupported';
 interface AppProps {
   readonly connectionState?: ConnectionState;
   readonly previewRequester?: DelegationPreviewRequester;
+  readonly agentStatusRequester?: AgentStatusRequester;
 }
 
 interface AgentManifestView {
-  readonly id: string;
+  readonly id: AgentId;
   readonly name: string;
   readonly state: AgentState;
   readonly stateLabel: string;
@@ -88,14 +95,14 @@ const AGENT_MANIFESTS: readonly AgentManifestView[] = [
     name: 'OpenClaw',
     state: 'ready',
     stateLabel: 'Ready',
-    runtime: 'Tablet 2026.7.4 + Windows gateway',
+    runtime: 'Windows gateway',
     version: '2026.7.1-2',
     bestFor: ['Tablet companion actions', 'Bounded device handoffs'],
     doNotUseFor: 'Camera, contacts, or messages without explicit approval',
-    evidence: 'Gateway online; bounded tablet pairing verified',
+    evidence: 'Gateway and bounded tablet pairing previously verified',
     actionLabel: 'OpenClaw connected',
     actionAvailable: false,
-    statusNote: 'Gateway online; tablet node 1/1 with no operator.admin scope.',
+    statusNote: 'Live gateway status is checked when the trusted host is online.',
   },
   {
     id: 'antigravity',
@@ -147,6 +154,41 @@ const AGENT_NAMES: Readonly<Record<string, string>> = {
   openclaw: 'OpenClaw',
   antigravity: 'Antigravity',
 };
+
+const STATUS_NOTES: Readonly<Record<AgentStatusCode, string>> = {
+  AVAILABLE: 'Installed and responding on trusted host.',
+  AUTHENTICATED: 'Installed and authenticated on trusted host.',
+  CONNECTED: 'Connected to trusted host.',
+  DESKTOP_ONLY: 'Supervised Windows desktop tool; no safe headless adapter is available.',
+  UNAVAILABLE: 'Not detected on trusted host.',
+  PROBE_TIMEOUT: 'Status check timed out safely.',
+  PROBE_FAILED: 'Status check failed closed.',
+};
+
+function applyLiveAgentStatus(
+  manifest: AgentManifestView,
+  status: AgentRuntimeStatus | undefined,
+): AgentManifestView {
+  if (status === undefined) return manifest;
+  const state = status.state.toLowerCase() as AgentState;
+  const stateLabel =
+    status.state === 'UNSUPPORTED'
+      ? 'Desktop only'
+      : status.state[0] + status.state.slice(1).toLowerCase();
+  return {
+    ...manifest,
+    state,
+    stateLabel,
+    version: status.version ?? 'Not detected',
+    evidence: `Trusted host check: ${status.statusCode.toLowerCase().replaceAll('_', ' ')}.`,
+    actionLabel:
+      status.id === 'antigravity'
+        ? 'View Antigravity limitation'
+        : `${manifest.name} status verified`,
+    actionAvailable: status.id === 'antigravity',
+    statusNote: STATUS_NOTES[status.statusCode],
+  };
+}
 
 function formatMicrodollars(value: number): string {
   return `$${(value / 1_000_000).toFixed(2)}`;
@@ -423,6 +465,7 @@ function LimitationDialog({ onClose }: Readonly<{ onClose: () => void }>) {
 export function App({
   connectionState: forcedConnectionState,
   previewRequester = requestDelegationPreview,
+  agentStatusRequester = requestAgentStatus,
 }: AppProps) {
   const connectionState = useConnectionState(forcedConnectionState);
   const [objective, setObjective] = useState('');
@@ -432,9 +475,17 @@ export function App({
   const [requestError, setRequestError] = useState<string | null>(null);
   const [isPlanning, setIsPlanning] = useState(false);
   const [showLimitation, setShowLimitation] = useState(false);
+  const [agentStatus, setAgentStatus] = useState<AgentStatusSnapshot | null>(null);
+  const [agentStatusState, setAgentStatusState] = useState<
+    'awaiting' | 'checking' | 'verified' | 'unavailable'
+  >('awaiting');
   const activePreviewRequestRef = useRef<AbortController | null>(null);
   const previewRequestGenerationRef = useRef(0);
   const isOffline = connectionState === 'offline';
+  const liveStatusById = new Map(agentStatus?.agents.map((status) => [status.id, status]) ?? []);
+  const displayedAgents = AGENT_MANIFESTS.map((manifest) =>
+    applyLiveAgentStatus(manifest, liveStatusById.get(manifest.id)),
+  );
 
   const invalidatePreviewRequest = useCallback(() => {
     previewRequestGenerationRef.current += 1;
@@ -457,6 +508,30 @@ export function App({
     setPreview(null);
     setPreviewBudgetCap(null);
   }, [invalidatePreviewRequest, isOffline]);
+
+  useEffect(() => {
+    if (isOffline) {
+      setAgentStatus(null);
+      setAgentStatusState('awaiting');
+      return undefined;
+    }
+
+    const controller = new AbortController();
+    setAgentStatusState('checking');
+    void agentStatusRequester({ signal: controller.signal }).then(
+      (snapshot) => {
+        if (controller.signal.aborted) return;
+        setAgentStatus(snapshot);
+        setAgentStatusState('verified');
+      },
+      () => {
+        if (controller.signal.aborted) return;
+        setAgentStatus(null);
+        setAgentStatusState('unavailable');
+      },
+    );
+    return () => controller.abort();
+  }, [agentStatusRequester, isOffline]);
 
   const handlePlan = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -579,10 +654,20 @@ export function App({
             </span>
           </div>
           <div className="health-item">
-            <StatusMark state={preview === null ? (isOffline ? 'offline' : 'degraded') : 'ready'} />
+            <StatusMark
+              state={isOffline ? 'offline' : agentStatusState === 'verified' ? 'ready' : 'degraded'}
+            />
             <span>
               <strong>Host link</strong>
-              <small>{preview === null ? 'Awaiting preview' : 'Preview verified'}</small>
+              <small>
+                {isOffline
+                  ? 'Offline'
+                  : agentStatusState === 'verified'
+                    ? 'Agents verified'
+                    : agentStatusState === 'unavailable'
+                      ? 'Status unavailable'
+                      : 'Checking agents'}
+              </small>
             </span>
           </div>
         </div>
@@ -711,7 +796,7 @@ export function App({
             </div>
 
             <div className="agent-grid">
-              {AGENT_MANIFESTS.map((agent) => (
+              {displayedAgents.map((agent) => (
                 <AgentCard
                   key={agent.id}
                   agent={agent}
@@ -789,12 +874,14 @@ export function App({
         </div>
         <p className="footer-mode">
           <span
-            className={`status-mark status-mark--${preview === null ? 'degraded' : 'ready'}`}
+            className={`status-mark status-mark--${preview !== null || agentStatusState === 'verified' ? 'ready' : 'degraded'}`}
             aria-hidden="true"
           />
-          {preview === null
-            ? 'Preview shell · awaiting host'
-            : 'Host-validated preview · no execution'}
+          {preview !== null
+            ? 'Host-validated preview · no execution'
+            : agentStatusState === 'verified'
+              ? 'Host status verified · no execution'
+              : 'Preview shell · awaiting host'}
         </p>
       </footer>
 

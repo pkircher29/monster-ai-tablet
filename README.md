@@ -42,6 +42,9 @@ an implementation.
 
 - A touch-first installable PWA lists Hermes, Codex, Claude Code, OpenClaw, and Antigravity with
   explicit **Best for** and **Do not use for** guidance.
+- The agent rack reads a host-owned `GET /api/agents/status` snapshot. Hermes, Codex, Claude Code,
+  and OpenClaw are checked with bounded server-owned probes; Antigravity is reported honestly as a
+  supervised desktop-only tool.
 - A host-owned registry decomposes an objective into research, implementation, verification, and
   review work, then returns versioned agent/model/tool assignments with evidence and cost bounds.
 - The OpenRouter adapter is exact-model, no-tools by default, secret-safe, and budget-reserved. No
@@ -60,6 +63,7 @@ verification after the temporary test listeners are stopped.
 ## Security boundary
 
 Credentials and provider tokens belong on the trusted host, not in the tablet browser or source
-control. The preview HTTP surface is loopback-only behind Tailscale and has no execution routes.
+control. Probe output, command lines, paths, identities, and credentials are never returned by the
+status API. The preview HTTP surface is loopback-only behind Tailscale and has no execution routes.
 Authentication is still required before any future execution-capable API can be added. See
 [`tasks/plan.md`](tasks/plan.md) for the full architecture and delivery phases.

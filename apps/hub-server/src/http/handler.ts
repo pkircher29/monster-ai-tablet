@@ -9,6 +9,7 @@ import { createDelegationPreview } from '../delegation-preview.js';
 import { DelegationPreviewInputError } from '../input.js';
 import { DEFAULT_HUB_STATIC_DIRECTORY } from './paths.js';
 import { createServerOwnedAgentRegistry } from './registry.js';
+import { createDefaultAgentStatusProvider } from './status.js';
 import type { HubRequestHandlerOptions, ServerOwnedAgentRegistry } from './types.js';
 
 export const DEFAULT_HUB_BUDGET_CEILING_MICRODOLLARS = 400_000;
@@ -464,6 +465,8 @@ export function createHubRequestHandler(
   const staticDirectory = options.staticDirectory ?? DEFAULT_HUB_STATIC_DIRECTORY;
   const clock = options.clock ?? (() => new Date());
   const registry = options.agentRegistry ?? createServerOwnedAgentRegistry();
+  const agentStatusProvider =
+    options.agentStatusProvider ?? createDefaultAgentStatusProvider(clock);
 
   return async (request, response) => {
     try {
@@ -498,6 +501,21 @@ export function createHubRequestHandler(
           mode: 'PREVIEW_ONLY',
           schemaVersion: 1,
         });
+        return;
+      }
+
+      if (path === '/api/agents/status') {
+        if (request.method !== 'GET') {
+          sendJson(
+            response,
+            405,
+            errorBody('METHOD_NOT_ALLOWED', 'This local route does not accept that method.'),
+            { allow: 'GET' },
+          );
+          request.resume();
+          return;
+        }
+        sendJson(response, 200, await agentStatusProvider());
         return;
       }
 

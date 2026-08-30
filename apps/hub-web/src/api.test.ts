@@ -1,10 +1,97 @@
 import { describe, expect, it, vi } from 'vitest';
 
-import { HubApiError, requestDelegationPreview } from './api';
+import { HubApiError, requestAgentStatus, requestDelegationPreview } from './api';
 
 const RESPONSE_HEADERS = { 'content-type': 'application/json; charset=utf-8' };
 const HOST_BUDGET_CEILING_MICRODOLLARS = 400_000;
 const DEFAULT_OBJECTIVE = 'Build and verify the bounded tablet hub.';
+
+const VALID_AGENT_STATUS = {
+  schemaVersion: 1,
+  mode: 'READ_ONLY',
+  observedAt: '2026-08-30T12:00:00.000Z',
+  agents: [
+    { id: 'hermes', state: 'READY', statusCode: 'AVAILABLE', version: '0.20.5' },
+    { id: 'codex', state: 'READY', statusCode: 'AUTHENTICATED', version: '0.150.1' },
+    {
+      id: 'claude-code',
+      state: 'READY',
+      statusCode: 'AUTHENTICATED',
+      version: '2.1.251',
+    },
+    { id: 'openclaw', state: 'READY', statusCode: 'AVAILABLE', version: '2026.7.1-2' },
+    {
+      id: 'antigravity',
+      state: 'UNSUPPORTED',
+      statusCode: 'DESKTOP_ONLY',
+      version: null,
+    },
+  ],
+} as const;
+
+describe('hub agent status client', () => {
+  it('gets and freezes the closed read-only status snapshot', async () => {
+    const fetcher = vi.fn<typeof fetch>().mockResolvedValue(
+      new Response(JSON.stringify(VALID_AGENT_STATUS), {
+        status: 200,
+        headers: RESPONSE_HEADERS,
+      }),
+    );
+
+    const snapshot = await requestAgentStatus({}, fetcher);
+
+    expect(fetcher).toHaveBeenCalledWith(
+      '/api/agents/status',
+      expect.objectContaining({
+        method: 'GET',
+        credentials: 'same-origin',
+        cache: 'no-store',
+        redirect: 'error',
+      }),
+    );
+    expect(snapshot.agents).toHaveLength(5);
+    expect(snapshot.agents[1]).toEqual({
+      id: 'codex',
+      state: 'READY',
+      statusCode: 'AUTHENTICATED',
+      version: '0.150.1',
+    });
+    expect(Object.isFrozen(snapshot)).toBe(true);
+    expect(Object.isFrozen(snapshot.agents)).toBe(true);
+  });
+
+  it.each([
+    ['an extra diagnostic field', { ...VALID_AGENT_STATUS, commandLine: 'secret --token value' }],
+    [
+      'an extra per-agent field',
+      {
+        ...VALID_AGENT_STATUS,
+        agents: VALID_AGENT_STATUS.agents.map((agent, index) =>
+          index === 0 ? { ...agent, account: 'private@example.test' } : agent,
+        ),
+      },
+    ],
+    [
+      'a duplicate agent id',
+      {
+        ...VALID_AGENT_STATUS,
+        agents: VALID_AGENT_STATUS.agents.map((agent, index) =>
+          index === 4 ? { ...agent, id: 'hermes' } : agent,
+        ),
+      },
+    ],
+  ])('rejects %s', async (_label, body) => {
+    const fetcher = vi
+      .fn<typeof fetch>()
+      .mockResolvedValue(
+        new Response(JSON.stringify(body), { status: 200, headers: RESPONSE_HEADERS }),
+      );
+
+    await expect(requestAgentStatus({}, fetcher)).rejects.toMatchObject({
+      code: 'INVALID_RESPONSE',
+    });
+  });
+});
 
 function validPreview(
   objective = DEFAULT_OBJECTIVE,

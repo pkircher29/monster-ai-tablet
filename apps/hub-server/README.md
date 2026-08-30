@@ -29,6 +29,11 @@ The default listener is `127.0.0.1:8787`. `MONSTER_HUB_HOST` and `MONSTER_HUB_PO
 }
 ```
 
+`GET /api/agents/status` runs bounded, server-owned availability checks and returns only closed
+status enums and safe version strings. It never accepts executable names or arguments from the
+client and never returns raw stdout, stderr, paths, account identities, process IDs, or command
+lines. The endpoint is read-only and does not launch an agent session.
+
 `POST /api/delegation/preview` accepts only uncompressed UTF-8 `application/json` with this exact shape:
 
 ```json

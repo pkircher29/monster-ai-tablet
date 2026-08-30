@@ -1,4 +1,5 @@
 const PREVIEW_ENDPOINT = '/api/delegation/preview';
+const AGENT_STATUS_ENDPOINT = '/api/agents/status';
 const MAX_RESPONSE_BYTES = 256 * 1024;
 const REQUEST_TIMEOUT_MS = 10_000;
 const MAX_OBJECTIVE_LENGTH = 1_024;
@@ -7,6 +8,41 @@ const MAX_ASSIGNMENT_REASONS = 8;
 const MAX_BUDGET_MICRODOLLARS = 400_000;
 const STABLE_ID = /^[a-z0-9][a-z0-9._-]{0,63}$/;
 const VERSIONED_PROFILE_ID = /^[A-Za-z0-9][A-Za-z0-9._/-]{0,127}@[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
+const SAFE_VERSION = /^[A-Za-z0-9][A-Za-z0-9._+-]{0,63}$/;
+const AGENT_IDS = ['hermes', 'codex', 'claude-code', 'openclaw', 'antigravity'] as const;
+
+export type AgentId = (typeof AGENT_IDS)[number];
+export type AgentConnectionState = 'READY' | 'DEGRADED' | 'OFFLINE' | 'UNSUPPORTED';
+export type AgentStatusCode =
+  | 'AVAILABLE'
+  | 'AUTHENTICATED'
+  | 'CONNECTED'
+  | 'DESKTOP_ONLY'
+  | 'UNAVAILABLE'
+  | 'PROBE_TIMEOUT'
+  | 'PROBE_FAILED';
+
+export interface AgentRuntimeStatus {
+  readonly id: AgentId;
+  readonly state: AgentConnectionState;
+  readonly statusCode: AgentStatusCode;
+  readonly version: string | null;
+}
+
+export interface AgentStatusSnapshot {
+  readonly schemaVersion: 1;
+  readonly mode: 'READ_ONLY';
+  readonly observedAt: string;
+  readonly agents: readonly AgentRuntimeStatus[];
+}
+
+export interface AgentStatusRequestOptions {
+  readonly signal?: AbortSignal;
+}
+
+export type AgentStatusRequester = (
+  options?: AgentStatusRequestOptions,
+) => Promise<AgentStatusSnapshot>;
 
 export interface DelegationPreviewRequest {
   readonly objective: string;
@@ -56,6 +92,17 @@ export class HubApiError extends Error {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function hasExactKeys(value: Record<string, unknown>, keys: readonly string[]): boolean {
+  const actual = Object.keys(value);
+  return actual.length === keys.length && keys.every((key) => Object.hasOwn(value, key));
+}
+
+function isCanonicalTimestamp(value: unknown): value is string {
+  if (typeof value !== 'string') return false;
+  const timestamp = Date.parse(value);
+  return Number.isFinite(timestamp) && new Date(timestamp).toISOString() === value;
 }
 
 function invalidResponse(): never {
@@ -267,6 +314,119 @@ function parsePreview(
   if (calculatedCost !== estimatedTotalCostMicrodollars) return invalidResponse();
 
   return deepFreeze({ objective, workItems, assignments, estimatedTotalCostMicrodollars });
+}
+
+function parseAgentStatus(value: unknown): AgentStatusSnapshot {
+  if (
+    !isRecord(value) ||
+    !hasExactKeys(value, ['schemaVersion', 'mode', 'observedAt', 'agents']) ||
+    value.schemaVersion !== 1 ||
+    value.mode !== 'READ_ONLY' ||
+    !isCanonicalTimestamp(value.observedAt) ||
+    !Array.isArray(value.agents) ||
+    value.agents.length !== AGENT_IDS.length
+  ) {
+    return invalidResponse();
+  }
+
+  const expectedIds = new Set<string>(AGENT_IDS);
+  const observedIds = new Set<string>();
+  const states = new Set<AgentConnectionState>(['READY', 'DEGRADED', 'OFFLINE', 'UNSUPPORTED']);
+  const statusCodes = new Set<AgentStatusCode>([
+    'AVAILABLE',
+    'AUTHENTICATED',
+    'CONNECTED',
+    'DESKTOP_ONLY',
+    'UNAVAILABLE',
+    'PROBE_TIMEOUT',
+    'PROBE_FAILED',
+  ]);
+  const expectedState: Readonly<Record<AgentStatusCode, AgentConnectionState>> = {
+    AVAILABLE: 'READY',
+    AUTHENTICATED: 'READY',
+    CONNECTED: 'READY',
+    DESKTOP_ONLY: 'UNSUPPORTED',
+    UNAVAILABLE: 'OFFLINE',
+    PROBE_TIMEOUT: 'DEGRADED',
+    PROBE_FAILED: 'DEGRADED',
+  };
+
+  const agents = value.agents.map((agent): AgentRuntimeStatus => {
+    if (!isRecord(agent) || !hasExactKeys(agent, ['id', 'state', 'statusCode', 'version'])) {
+      return invalidResponse();
+    }
+    if (
+      typeof agent.id !== 'string' ||
+      !expectedIds.has(agent.id) ||
+      observedIds.has(agent.id) ||
+      typeof agent.state !== 'string' ||
+      !states.has(agent.state as AgentConnectionState) ||
+      typeof agent.statusCode !== 'string' ||
+      !statusCodes.has(agent.statusCode as AgentStatusCode) ||
+      expectedState[agent.statusCode as AgentStatusCode] !== agent.state ||
+      (agent.version !== null &&
+        (typeof agent.version !== 'string' || !SAFE_VERSION.test(agent.version)))
+    ) {
+      return invalidResponse();
+    }
+    observedIds.add(agent.id);
+    return {
+      id: agent.id as AgentId,
+      state: agent.state as AgentConnectionState,
+      statusCode: agent.statusCode as AgentStatusCode,
+      version: agent.version as string | null,
+    };
+  });
+  if (observedIds.size !== expectedIds.size) return invalidResponse();
+
+  return deepFreeze({
+    schemaVersion: 1,
+    mode: 'READ_ONLY',
+    observedAt: value.observedAt,
+    agents,
+  });
+}
+
+export async function requestAgentStatus(
+  options: AgentStatusRequestOptions = {},
+  fetcher: typeof fetch = fetch,
+): Promise<AgentStatusSnapshot> {
+  if (options.signal?.aborted === true) {
+    throw new HubApiError('REQUEST_CANCELLED', 'The agent status request was cancelled.');
+  }
+
+  const controller = new AbortController();
+  let callerCancelled = false;
+  const cancelFromCaller = () => {
+    callerCancelled = true;
+    controller.abort();
+  };
+  options.signal?.addEventListener('abort', cancelFromCaller, { once: true });
+  const timeout = globalThis.setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+  try {
+    const response = await fetcher(AGENT_STATUS_ENDPOINT, {
+      method: 'GET',
+      headers: { Accept: 'application/json' },
+      credentials: 'same-origin',
+      cache: 'no-store',
+      redirect: 'error',
+      signal: controller.signal,
+    });
+    const body = await readJson(response);
+    if (!response.ok) {
+      throw new HubApiError('HOST_UNAVAILABLE', 'Live agent status is unavailable.');
+    }
+    return parseAgentStatus(body);
+  } catch (error) {
+    if (callerCancelled) {
+      throw new HubApiError('REQUEST_CANCELLED', 'The agent status request was cancelled.');
+    }
+    if (error instanceof HubApiError) throw error;
+    throw new HubApiError('HOST_UNAVAILABLE', 'Live agent status is unavailable.');
+  } finally {
+    globalThis.clearTimeout(timeout);
+    options.signal?.removeEventListener('abort', cancelFromCaller);
+  }
 }
 
 export async function requestDelegationPreview(

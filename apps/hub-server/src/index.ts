@@ -1,5 +1,18 @@
 export { createDelegationPreview, getReadyWorkItemIds } from './delegation-preview.js';
 export {
+  createAgentProbeCommands,
+  createLiveAgentStatusProvider,
+  runAgentProbeCommand,
+} from './agent-status/index.js';
+export type {
+  AgentProbeCommand,
+  AgentProbeId,
+  AgentProbeResult,
+  AgentProbeRunner,
+  LiveAgentStatusProvider,
+  LiveAgentStatusProviderOptions,
+} from './agent-status/index.js';
+export {
   DEFAULT_HUB_BUDGET_CEILING_MICRODOLLARS,
   MAX_HUB_REQUEST_BODY_BYTES,
   MAX_HUB_STATIC_FILE_BYTES,
@@ -34,7 +47,12 @@ export type {
   WindowsCredentialResolver,
 } from './providers/openrouter/index.js';
 export type {
+  AgentConnectionState,
   AgentEvidenceProvenance,
+  AgentRuntimeStatus,
+  AgentStatusCode,
+  AgentStatusProvider,
+  AgentStatusSnapshot,
   HubRequestHandlerOptions,
   HubServerOptions,
   ServerOwnedAgentEvidence,
