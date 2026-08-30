@@ -1,0 +1,15 @@
+{
+  "_comment": "Copy of this is auto-created as subscriptions.json (gitignored) on first run. Edit subscriptions.json with what you actually pay per month; the Ledger/Caps pages compare real spend vs API-equivalent value.",
+  "subscriptions": [
+    { "tool": "claude-code", "plan": "Claude plan (Pro/Max)", "monthlyUSD": 0 },
+    { "tool": "codex",       "plan": "ChatGPT plan",          "monthlyUSD": 0 },
+    { "tool": "copilot",     "plan": "GitHub Copilot",        "monthlyUSD": 0 },
+    { "tool": "antigravity", "plan": "Antigravity",           "monthlyUSD": 0 },
+    { "tool": "ollama",      "plan": "local",                 "monthlyUSD": 0 },
+    { "tool": "lmstudio",    "plan": "local",                 "monthlyUSD": 0 },
+    { "tool": "openrouter",  "plan": "OpenRouter credits",    "monthlyUSD": 0 }
+  ],
+  "apiKeys": [
+    { "provider": "e.g. anthropic-api / openai-api / openrouter", "estimatedMonthlyUSD": 0 }
+  ]
+}

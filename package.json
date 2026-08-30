@@ -1,0 +1,33 @@
+{
+  "name": "ai-spy",
+  "version": "1.1.0",
+  "description": "Recon and command console for every AI agent, harness, and local model on your machine \u2014 usage, spend, capability inventory, cross-platform network discovery, and Claude-orchestrated routing. Zero dependencies.",
+  "type": "module",
+  "bin": {
+    "ai-spy": "server.mjs"
+  },
+  "scripts": {
+    "start": "node server.mjs",
+    "test": "node --test",
+    "watch": "node watchdog.mjs",
+    "report": "node agentos.mjs report"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "keywords": [
+    "ai",
+    "agents",
+    "llm",
+    "ollama",
+    "lm-studio",
+    "claude",
+    "dashboard",
+    "orchestration",
+    "self-hosted",
+    "usage-tracking",
+    "mcp"
+  ],
+  "license": "MIT",
+  "private": false
+}

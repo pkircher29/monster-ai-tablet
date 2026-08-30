@@ -1,0 +1,15 @@
+# secrets & personal data — never commit
+config/keys.json
+config/subscriptions.json
+config/agents.json
+config/budget.json
+config/benchmarks.json
+
+# generated / machine-specific output
+data/
+dashboard.html
+REPORT.md
+
+# node
+node_modules/
+npm-debug.log*
