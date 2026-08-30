@@ -1,6 +1,63 @@
 import { describe, expect, it, vi } from 'vitest';
 
-import { HubApiError, requestAgentStatus, requestDelegationPreview } from './api';
+import {
+  HubApiError,
+  requestAgentStatus,
+  requestDelegationAssignment,
+  requestDelegationPreview,
+  requestToolRecon,
+} from './api';
+
+describe('hub assignment client', () => {
+  it('posts an explicit assignment confirmation and accepts only the closed queue receipt', async () => {
+    const objective = 'Build and verify the bounded tablet hub.';
+    const body = {
+      schemaVersion: 1,
+      mode: 'ASSIGNED',
+      assignmentId: 'assignment.11111111-1111-4111-8111-111111111111',
+      queuedAt: '2026-08-30T12:00:00.000Z',
+      objective,
+      items: [
+        {
+          workItemId: 'research',
+          title: 'Research',
+          agentProfileId: 'hermes@0.20.5',
+          state: 'QUEUED',
+        },
+      ],
+      commandExecution: 'DISABLED',
+    };
+    const fetcher = vi.fn<typeof fetch>().mockResolvedValue(
+      new Response(JSON.stringify(body), {
+        status: 202,
+        headers: { 'content-type': 'application/json; charset=utf-8' },
+      }),
+    );
+    const result = await requestDelegationAssignment(
+      {
+        objective,
+        workspace: 'monster-agent-hub',
+        budgetCapMicrodollars: 400_000,
+      },
+      {},
+      fetcher,
+    );
+    expect(fetcher).toHaveBeenCalledWith(
+      '/api/delegation/assign',
+      expect.objectContaining({
+        method: 'POST',
+        body: JSON.stringify({
+          objective,
+          workspace: 'monster-agent-hub',
+          budgetCapMicrodollars: 400_000,
+          confirmation: 'ASSIGN',
+        }),
+      }),
+    );
+    expect(result.items[0]?.state).toBe('QUEUED');
+    expect(Object.isFrozen(result)).toBe(true);
+  });
+});
 
 const RESPONSE_HEADERS = { 'content-type': 'application/json; charset=utf-8' };
 const HOST_BUDGET_CEILING_MICRODOLLARS = 400_000;
@@ -88,6 +145,74 @@ describe('hub agent status client', () => {
       );
 
     await expect(requestAgentStatus({}, fetcher)).rejects.toMatchObject({
+      code: 'INVALID_RESPONSE',
+    });
+  });
+});
+
+const VALID_TOOL_RECON = {
+  schemaVersion: 1,
+  mode: 'READ_ONLY',
+  source: 'AI_SPY',
+  observedAt: '2026-08-30T09:00:00.000Z',
+  catalogCount: 14,
+  installedCount: 2,
+  tools: [
+    {
+      id: 'claude-code',
+      name: 'Claude Code',
+      category: 'HARNESS',
+      vendor: 'Anthropic',
+      detection: 'BOTH',
+    },
+    {
+      id: 'ollama',
+      name: 'Ollama',
+      category: 'LOCAL_MODEL',
+      vendor: 'Ollama',
+      detection: 'PROFILE',
+    },
+  ],
+  restrictedCapabilities: [
+    'COMMAND_EXECUTION_DISABLED',
+    'KEY_MANAGEMENT_DISABLED',
+    'NETWORK_SCAN_DISABLED',
+  ],
+} as const;
+
+describe('hub AI-Spy reconnaissance client', () => {
+  it('gets a validated path-free inventory', async () => {
+    const fetcher = vi.fn<typeof fetch>().mockResolvedValue(
+      new Response(JSON.stringify(VALID_TOOL_RECON), {
+        status: 200,
+        headers: RESPONSE_HEADERS,
+      }),
+    );
+
+    const snapshot = await requestToolRecon({}, fetcher);
+
+    expect(fetcher).toHaveBeenCalledWith(
+      '/api/recon/tools',
+      expect.objectContaining({ method: 'GET', credentials: 'same-origin', cache: 'no-store' }),
+    );
+    expect(snapshot.installedCount).toBe(2);
+    expect(snapshot.tools.map((tool) => tool.name)).toEqual(['Claude Code', 'Ollama']);
+    expect(Object.isFrozen(snapshot)).toBe(true);
+  });
+
+  it('rejects upstream AI-Spy path and command details', async () => {
+    const unsafe = {
+      ...VALID_TOOL_RECON,
+      tools: [{ ...VALID_TOOL_RECON.tools[0], cliPath: 'C:\\private\\claude.exe' }],
+      installedCount: 1,
+    };
+    const fetcher = vi
+      .fn<typeof fetch>()
+      .mockResolvedValue(
+        new Response(JSON.stringify(unsafe), { status: 200, headers: RESPONSE_HEADERS }),
+      );
+
+    await expect(requestToolRecon({}, fetcher)).rejects.toMatchObject({
       code: 'INVALID_RESPONSE',
     });
   });

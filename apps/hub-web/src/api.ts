@@ -1,5 +1,7 @@
 const PREVIEW_ENDPOINT = '/api/delegation/preview';
+const ASSIGN_ENDPOINT = '/api/delegation/assign';
 const AGENT_STATUS_ENDPOINT = '/api/agents/status';
+const TOOL_RECON_ENDPOINT = '/api/recon/tools';
 const MAX_RESPONSE_BYTES = 256 * 1024;
 const REQUEST_TIMEOUT_MS = 10_000;
 const MAX_OBJECTIVE_LENGTH = 1_024;
@@ -44,6 +46,38 @@ export type AgentStatusRequester = (
   options?: AgentStatusRequestOptions,
 ) => Promise<AgentStatusSnapshot>;
 
+export type ReconToolCategory = 'HARNESS' | 'IDE' | 'LOCAL_MODEL' | 'ASSISTANT' | 'INFRASTRUCTURE';
+export type ReconToolDetection = 'PROFILE' | 'CLI' | 'BOTH';
+
+export interface ReconToolSummary {
+  readonly id: string;
+  readonly name: string;
+  readonly category: ReconToolCategory;
+  readonly vendor: string;
+  readonly detection: ReconToolDetection;
+}
+
+export interface ToolReconSnapshot {
+  readonly schemaVersion: 1;
+  readonly mode: 'READ_ONLY';
+  readonly source: 'AI_SPY';
+  readonly observedAt: string;
+  readonly catalogCount: number;
+  readonly installedCount: number;
+  readonly tools: readonly ReconToolSummary[];
+  readonly restrictedCapabilities: readonly [
+    'COMMAND_EXECUTION_DISABLED',
+    'KEY_MANAGEMENT_DISABLED',
+    'NETWORK_SCAN_DISABLED',
+  ];
+}
+
+export interface ToolReconRequestOptions {
+  readonly signal?: AbortSignal;
+}
+
+export type ToolReconRequester = (options?: ToolReconRequestOptions) => Promise<ToolReconSnapshot>;
+
 export interface DelegationPreviewRequest {
   readonly objective: string;
   readonly workspace: string;
@@ -79,6 +113,28 @@ export type DelegationPreviewRequester = (
   request: DelegationPreviewRequest,
   options?: DelegationPreviewRequestOptions,
 ) => Promise<DelegationPreviewSummary>;
+
+export interface QueuedAssignmentItem {
+  readonly workItemId: string;
+  readonly title: string;
+  readonly agentProfileId: string;
+  readonly state: 'QUEUED';
+}
+
+export interface DelegationAssignment {
+  readonly schemaVersion: 1;
+  readonly mode: 'ASSIGNED';
+  readonly assignmentId: string;
+  readonly queuedAt: string;
+  readonly objective: string;
+  readonly items: readonly QueuedAssignmentItem[];
+  readonly commandExecution: 'DISABLED';
+}
+
+export type DelegationAssignmentRequester = (
+  request: DelegationPreviewRequest,
+  options?: DelegationPreviewRequestOptions,
+) => Promise<DelegationAssignment>;
 
 export class HubApiError extends Error {
   readonly code: string;
@@ -316,6 +372,61 @@ function parsePreview(
   return deepFreeze({ objective, workItems, assignments, estimatedTotalCostMicrodollars });
 }
 
+function parseAssignment(value: unknown, requestedObjective: string): DelegationAssignment {
+  if (
+    !isRecord(value) ||
+    !hasExactKeys(value, [
+      'schemaVersion',
+      'mode',
+      'assignmentId',
+      'queuedAt',
+      'objective',
+      'items',
+      'commandExecution',
+    ]) ||
+    value.schemaVersion !== 1 ||
+    value.mode !== 'ASSIGNED' ||
+    typeof value.assignmentId !== 'string' ||
+    !/^assignment\.[a-f0-9-]{36}$/.test(value.assignmentId) ||
+    !isCanonicalTimestamp(value.queuedAt) ||
+    value.objective !== requestedObjective ||
+    value.commandExecution !== 'DISABLED' ||
+    !Array.isArray(value.items) ||
+    value.items.length === 0 ||
+    value.items.length > MAX_WORK_ITEMS
+  ) {
+    return invalidResponse();
+  }
+  const ids = new Set<string>();
+  const items = value.items.map((item): QueuedAssignmentItem => {
+    if (
+      !isRecord(item) ||
+      !hasExactKeys(item, ['workItemId', 'title', 'agentProfileId', 'state']) ||
+      item.state !== 'QUEUED'
+    ) {
+      return invalidResponse();
+    }
+    const workItemId = stableId(item.workItemId);
+    if (ids.has(workItemId)) return invalidResponse();
+    ids.add(workItemId);
+    return {
+      workItemId,
+      title: boundedText(item.title, 160),
+      agentProfileId: versionedProfileId(item.agentProfileId),
+      state: 'QUEUED',
+    };
+  });
+  return deepFreeze({
+    schemaVersion: 1,
+    mode: 'ASSIGNED',
+    assignmentId: value.assignmentId,
+    queuedAt: value.queuedAt,
+    objective: requestedObjective,
+    items,
+    commandExecution: 'DISABLED',
+  });
+}
+
 function parseAgentStatus(value: unknown): AgentStatusSnapshot {
   if (
     !isRecord(value) ||
@@ -385,6 +496,130 @@ function parseAgentStatus(value: unknown): AgentStatusSnapshot {
     observedAt: value.observedAt,
     agents,
   });
+}
+
+function parseToolRecon(value: unknown): ToolReconSnapshot {
+  const keys = [
+    'schemaVersion',
+    'mode',
+    'source',
+    'observedAt',
+    'catalogCount',
+    'installedCount',
+    'tools',
+    'restrictedCapabilities',
+  ];
+  if (
+    !isRecord(value) ||
+    !hasExactKeys(value, keys) ||
+    value.schemaVersion !== 1 ||
+    value.mode !== 'READ_ONLY' ||
+    value.source !== 'AI_SPY' ||
+    !isCanonicalTimestamp(value.observedAt) ||
+    value.catalogCount !== 14 ||
+    !Number.isSafeInteger(value.installedCount) ||
+    (value.installedCount as number) < 0 ||
+    (value.installedCount as number) > value.catalogCount ||
+    !Array.isArray(value.tools) ||
+    value.tools.length !== value.installedCount
+  ) {
+    return invalidResponse();
+  }
+
+  const categories = new Set<ReconToolCategory>([
+    'HARNESS',
+    'IDE',
+    'LOCAL_MODEL',
+    'ASSISTANT',
+    'INFRASTRUCTURE',
+  ]);
+  const detections = new Set<ReconToolDetection>(['PROFILE', 'CLI', 'BOTH']);
+  const ids = new Set<string>();
+  const tools = value.tools.map((tool): ReconToolSummary => {
+    if (!isRecord(tool) || !hasExactKeys(tool, ['id', 'name', 'category', 'vendor', 'detection'])) {
+      return invalidResponse();
+    }
+    const id = stableId(tool.id);
+    if (
+      ids.has(id) ||
+      typeof tool.category !== 'string' ||
+      !categories.has(tool.category as ReconToolCategory) ||
+      typeof tool.detection !== 'string' ||
+      !detections.has(tool.detection as ReconToolDetection)
+    ) {
+      return invalidResponse();
+    }
+    ids.add(id);
+    return {
+      id,
+      name: boundedText(tool.name, 128),
+      category: tool.category as ReconToolCategory,
+      vendor: boundedText(tool.vendor, 128),
+      detection: tool.detection as ReconToolDetection,
+    };
+  });
+  const restrictions = [
+    'COMMAND_EXECUTION_DISABLED',
+    'KEY_MANAGEMENT_DISABLED',
+    'NETWORK_SCAN_DISABLED',
+  ] as const;
+  const restrictedCapabilities = value.restrictedCapabilities;
+  if (
+    !Array.isArray(restrictedCapabilities) ||
+    restrictedCapabilities.length !== restrictions.length ||
+    !restrictions.every((restriction, index) => restrictedCapabilities[index] === restriction)
+  ) {
+    return invalidResponse();
+  }
+  return deepFreeze({
+    schemaVersion: 1,
+    mode: 'READ_ONLY',
+    source: 'AI_SPY',
+    observedAt: value.observedAt,
+    catalogCount: value.catalogCount,
+    installedCount: value.installedCount as number,
+    tools,
+    restrictedCapabilities: restrictions,
+  });
+}
+
+export async function requestToolRecon(
+  options: ToolReconRequestOptions = {},
+  fetcher: typeof fetch = fetch,
+): Promise<ToolReconSnapshot> {
+  if (options.signal?.aborted === true) {
+    throw new HubApiError('REQUEST_CANCELLED', 'The reconnaissance request was cancelled.');
+  }
+  const controller = new AbortController();
+  let callerCancelled = false;
+  const cancelFromCaller = () => {
+    callerCancelled = true;
+    controller.abort();
+  };
+  options.signal?.addEventListener('abort', cancelFromCaller, { once: true });
+  const timeout = globalThis.setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+  try {
+    const response = await fetcher(TOOL_RECON_ENDPOINT, {
+      method: 'GET',
+      headers: { Accept: 'application/json' },
+      credentials: 'same-origin',
+      cache: 'no-store',
+      redirect: 'error',
+      signal: controller.signal,
+    });
+    const body = await readJson(response);
+    if (!response.ok) throw new HubApiError('HOST_UNAVAILABLE', 'Tool inventory is unavailable.');
+    return parseToolRecon(body);
+  } catch (error) {
+    if (callerCancelled) {
+      throw new HubApiError('REQUEST_CANCELLED', 'The reconnaissance request was cancelled.');
+    }
+    if (error instanceof HubApiError) throw error;
+    throw new HubApiError('HOST_UNAVAILABLE', 'Tool inventory is unavailable.');
+  } finally {
+    globalThis.clearTimeout(timeout);
+    options.signal?.removeEventListener('abort', cancelFromCaller);
+  }
 }
 
 export async function requestAgentStatus(
@@ -502,6 +737,64 @@ export async function requestDelegationPreview(
       'HOST_UNAVAILABLE',
       'The trusted host is unavailable. Try again shortly.',
     );
+  } finally {
+    globalThis.clearTimeout(timeout);
+    options.signal?.removeEventListener('abort', cancelFromCaller);
+  }
+}
+
+export async function requestDelegationAssignment(
+  input: DelegationPreviewRequest,
+  options: DelegationPreviewRequestOptions = {},
+  fetcher: typeof fetch = fetch,
+): Promise<DelegationAssignment> {
+  const objective = typeof input.objective === 'string' ? input.objective.trim() : '';
+  if (
+    objective.length === 0 ||
+    objective.length > MAX_OBJECTIVE_LENGTH ||
+    !isSafeText(objective) ||
+    input.workspace !== 'monster-agent-hub' ||
+    !Number.isSafeInteger(input.budgetCapMicrodollars) ||
+    input.budgetCapMicrodollars < 0 ||
+    input.budgetCapMicrodollars > MAX_BUDGET_MICRODOLLARS
+  ) {
+    throw new HubApiError('INVALID_REQUEST', 'The assignment request is invalid.');
+  }
+  if (options.signal?.aborted === true) {
+    throw new HubApiError('REQUEST_CANCELLED', 'The assignment request was cancelled.');
+  }
+  const controller = new AbortController();
+  let callerCancelled = false;
+  const cancelFromCaller = () => {
+    callerCancelled = true;
+    controller.abort();
+  };
+  options.signal?.addEventListener('abort', cancelFromCaller, { once: true });
+  const timeout = globalThis.setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+  try {
+    const response = await fetcher(ASSIGN_ENDPOINT, {
+      method: 'POST',
+      headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        objective,
+        workspace: input.workspace,
+        budgetCapMicrodollars: input.budgetCapMicrodollars,
+        confirmation: 'ASSIGN',
+      }),
+      credentials: 'same-origin',
+      cache: 'no-store',
+      redirect: 'error',
+      signal: controller.signal,
+    });
+    const body = await readJson(response);
+    if (!response.ok) throw parseServerError(body);
+    return parseAssignment(body, objective);
+  } catch (error) {
+    if (callerCancelled) {
+      throw new HubApiError('REQUEST_CANCELLED', 'The assignment request was cancelled.');
+    }
+    if (error instanceof HubApiError) throw error;
+    throw new HubApiError('HOST_UNAVAILABLE', 'The trusted host could not queue the assignment.');
   } finally {
     globalThis.clearTimeout(timeout);
     options.signal?.removeEventListener('abort', cancelFromCaller);

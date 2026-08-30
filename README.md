@@ -1,8 +1,8 @@
 # Monster Agent Hub
 
 Monster Agent Hub is a local-first control surface for the Android coding tablet and its trusted
-Windows host. The current milestone provides a real, reviewable delegation preview; it does not
-launch agents or authorize external actions.
+Windows host. The current milestone provides reviewable delegation plus an explicit local
+assignment queue; it does not launch commands or authorize external actions.
 
 ## Workspace layout
 
@@ -38,7 +38,7 @@ npm run format:check
 The root commands automatically include workspace scripts as each application or package gains
 an implementation.
 
-## Current preview milestone
+## Current assignment milestone
 
 - A touch-first installable PWA lists Hermes, Codex, Claude Code, OpenClaw, and Antigravity with
   explicit **Best for** and **Do not use for** guidance.
@@ -47,12 +47,15 @@ an implementation.
   supervised desktop-only tool.
 - Closed status snapshots are retained in a capped local SQLite history on the Windows host, so
   availability evidence survives a hub restart without storing raw probe output.
+- A bounded AI-Spy-derived reconnaissance panel detects a fixed catalog of host tools without
+  returning paths, commands, credentials, recursive file scans, or network-scan data.
 - A host-owned registry decomposes an objective into research, implementation, verification, and
   review work, then returns versioned agent/model/tool assignments with evidence and cost bounds.
 - The OpenRouter adapter is exact-model, no-tools by default, secret-safe, and budget-reserved. No
   provider credential is configured and no paid model call has been made.
-- Approval and execution controls remain deliberately disabled. A preview has an empty
-  `sideEffects` list and cannot start work.
+- After reviewing a preview, the operator can explicitly queue its work-item assignments. The
+  queue is capped and host-memory-only in this increment; it cannot launch commands or survive a
+  host restart yet.
 - The PWA is installed on the physical tablet. Its service worker, standalone display mode,
   private host link, and four-item preview were verified after installation.
 
@@ -66,6 +69,7 @@ verification after the temporary test listeners are stopped.
 
 Credentials and provider tokens belong on the trusted host, not in the tablet browser or source
 control. Probe output, command lines, paths, identities, and credentials are never returned by the
-status API. The preview HTTP surface is loopback-only behind Tailscale and has no execution routes.
-Authentication is still required before any future execution-capable API can be added. See
+status or reconnaissance APIs. The HTTP surface is loopback-only behind Tailscale; assignment only
+writes to a bounded in-memory queue and has no command-execution route. Authentication is still
+required before any execution-capable API can be added. See
 [`tasks/plan.md`](tasks/plan.md) for the full architecture and delivery phases.

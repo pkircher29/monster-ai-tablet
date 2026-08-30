@@ -16,6 +16,8 @@
 - [ ] Implement manifest-driven agent registry
 - [x] Implement bounded read-only health probes for all five named agent profiles
 - [x] Persist bounded status history in SQLite
+- [x] Merge AI-Spy's fixed tool catalog as closed, read-only host reconnaissance
+- [x] Enable explicitly confirmed, capped in-memory work-item assignment queuing
 - [x] Build accessible, responsive installable PWA
 - [ ] Add authentication, redaction, CSP, and private-network checks
 
@@ -39,7 +41,7 @@
 
 - [x] Implement intent, plan-DAG, authority, budget, assignment, attempt, and routing-profile contracts
 - [x] Add a deterministic preview-only DAG and evidence-ranked versioned assignments
-- [ ] Implement DAG validation, monotonic child authority, durable scheduling, retry, and exact cancellation
+- [ ] Make the assignment queue durable and implement scheduling, retry, and exact cancellation
 - [ ] Implement capability router with explainable alternatives and manual pin/override
 - [x] Add a host-only, exact-model OpenRouter adapter with bounded catalog snapshots and no tablet credential surface
 - [ ] Add response-only and disposable-sandbox model audition modes

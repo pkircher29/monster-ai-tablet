@@ -1,4 +1,5 @@
 import type { IncomingMessage, OutgoingHttpHeaders, ServerResponse } from 'node:http';
+import { randomUUID } from 'node:crypto';
 import { readFile, realpath, stat } from 'node:fs/promises';
 import { extname, isAbsolute, relative, resolve, sep } from 'node:path';
 import { TextDecoder } from 'node:util';
@@ -48,6 +49,10 @@ interface PreviewRouteInput {
   readonly objective: string;
   readonly workspace: typeof DEFAULT_WORKSPACE;
   readonly budgetCapMicrodollars: number;
+}
+
+interface AssignRouteInput extends PreviewRouteInput {
+  readonly confirmation: 'ASSIGN';
 }
 
 interface StaticFile {
@@ -258,6 +263,42 @@ function parsePreviewRouteInput(value: unknown): PreviewRouteInput {
   };
 }
 
+function parseAssignRouteInput(value: unknown): AssignRouteInput {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+    throw new TypeError('invalid assignment request');
+  }
+  const record = value as Readonly<Record<string, unknown>>;
+  const keys = Object.keys(record);
+  if (keys.length !== 4 || record.confirmation !== 'ASSIGN') {
+    throw new TypeError('invalid assignment request');
+  }
+  const preview = parsePreviewRouteInput({
+    objective: record.objective,
+    workspace: record.workspace,
+    budgetCapMicrodollars: record.budgetCapMicrodollars,
+  });
+  return { ...preview, confirmation: 'ASSIGN' };
+}
+
+function previewFor(routeInput: PreviewRouteInput, now: Date, registry: ServerOwnedAgentRegistry) {
+  return createDelegationPreview(
+    {
+      objective: routeInput.objective,
+      requestedBy: DEFAULT_REQUESTED_BY,
+      previewedAt: now.toISOString(),
+      planRevision: DEFAULT_PLAN_REVISION,
+      planTtlMs: DEFAULT_PLAN_TTL_MS,
+      maxConcurrency: DEFAULT_MAX_CONCURRENCY,
+      budget: {
+        maxCostMicrodollars: routeInput.budgetCapMicrodollars,
+        maxTokens: DEFAULT_TOKEN_CEILING,
+        maxDurationMs: DEFAULT_DURATION_CEILING_MS,
+      },
+    },
+    registry.delegationRegistry,
+  );
+}
+
 async function handlePreview(
   request: IncomingMessage,
   response: ServerResponse,
@@ -313,22 +354,7 @@ async function handlePreview(
 
   try {
     const now = clock();
-    const preview = createDelegationPreview(
-      {
-        objective: routeInput.objective,
-        requestedBy: DEFAULT_REQUESTED_BY,
-        previewedAt: now.toISOString(),
-        planRevision: DEFAULT_PLAN_REVISION,
-        planTtlMs: DEFAULT_PLAN_TTL_MS,
-        maxConcurrency: DEFAULT_MAX_CONCURRENCY,
-        budget: {
-          maxCostMicrodollars: routeInput.budgetCapMicrodollars,
-          maxTokens: DEFAULT_TOKEN_CEILING,
-          maxDurationMs: DEFAULT_DURATION_CEILING_MS,
-        },
-      },
-      registry.delegationRegistry,
-    );
+    const preview = previewFor(routeInput, now, registry);
     sendJson(response, 200, preview);
   } catch (error) {
     if (error instanceof DelegationPreviewInputError || error instanceof ContractValidationError) {
@@ -343,6 +369,94 @@ async function handlePreview(
       response,
       500,
       errorBody('INTERNAL_ERROR', 'The local hub could not complete the request safely.'),
+    );
+  }
+}
+
+async function handleAssign(
+  request: IncomingMessage,
+  response: ServerResponse,
+  clock: () => Date,
+  registry: ServerOwnedAgentRegistry,
+  assignmentQueue: Map<string, unknown>,
+): Promise<void> {
+  if (!isJsonContentType(request) || !hasSupportedContentEncoding(request)) {
+    sendJson(
+      response,
+      415,
+      errorBody('UNSUPPORTED_MEDIA_TYPE', 'Only uncompressed UTF-8 JSON is accepted.'),
+    );
+    request.resume();
+    return;
+  }
+
+  let bodyResult: Awaited<ReturnType<typeof readBoundedBody>>;
+  try {
+    bodyResult = await readBoundedBody(request);
+  } catch {
+    sendJson(response, 400, errorBody('INVALID_JSON', 'The request body must be valid JSON.'));
+    return;
+  }
+  if (bodyResult.kind === 'TOO_LARGE') {
+    sendJson(
+      response,
+      413,
+      errorBody('REQUEST_BODY_TOO_LARGE', 'The request body exceeds the local limit.'),
+    );
+    return;
+  }
+
+  let routeInput: AssignRouteInput;
+  try {
+    const decoded = new TextDecoder('utf-8', { fatal: true }).decode(bodyResult.body);
+    routeInput = parseAssignRouteInput(JSON.parse(decoded) as unknown);
+  } catch {
+    sendJson(
+      response,
+      422,
+      errorBody('INVALID_ASSIGNMENT_REQUEST', 'Explicit assignment confirmation is required.'),
+    );
+    return;
+  }
+
+  try {
+    const now = clock();
+    const preview = previewFor(routeInput, now, registry);
+    const titles = new Map(preview.plan.workItems.map((item) => [item.id, item.title]));
+    const assignmentId = `assignment.${randomUUID()}`;
+    const receipt = {
+      schemaVersion: 1,
+      mode: 'ASSIGNED',
+      assignmentId,
+      queuedAt: now.toISOString(),
+      objective: preview.intent.objective,
+      items: preview.assignments.map((assignment) => ({
+        workItemId: assignment.workItemId,
+        title: titles.get(assignment.workItemId),
+        agentProfileId: assignment.candidate.agentProfileId,
+        state: 'QUEUED',
+      })),
+      commandExecution: 'DISABLED',
+    } as const;
+    assignmentQueue.set(assignmentId, receipt);
+    if (assignmentQueue.size > 100) {
+      const oldestId = assignmentQueue.keys().next().value as string | undefined;
+      if (oldestId !== undefined) assignmentQueue.delete(oldestId);
+    }
+    sendJson(response, 202, receipt);
+  } catch (error) {
+    if (error instanceof DelegationPreviewInputError || error instanceof ContractValidationError) {
+      sendJson(
+        response,
+        422,
+        errorBody('ASSIGNMENT_REJECTED', 'The objective is outside the assignment boundary.'),
+      );
+      return;
+    }
+    sendJson(
+      response,
+      500,
+      errorBody('INTERNAL_ERROR', 'The local hub could not queue the assignment safely.'),
     );
   }
 }
@@ -469,6 +583,7 @@ export function createHubRequestHandler(
   const agentStatusProvider =
     options.agentStatusProvider ?? createDefaultAgentStatusProvider(clock);
   const reconProvider = options.reconProvider ?? createToolReconProvider({ clock });
+  const assignmentQueue = new Map<string, unknown>();
 
   return async (request, response) => {
     try {
@@ -500,7 +615,7 @@ export function createHubRequestHandler(
         sendJson(response, 200, {
           status: 'ok',
           service: 'monster-agent-hub',
-          mode: 'PREVIEW_ONLY',
+          mode: 'ASSIGNMENT_QUEUE',
           schemaVersion: 1,
         });
         return;
@@ -548,6 +663,21 @@ export function createHubRequestHandler(
           return;
         }
         await handlePreview(request, response, clock, registry);
+        return;
+      }
+
+      if (path === '/api/delegation/assign') {
+        if (request.method !== 'POST') {
+          sendJson(
+            response,
+            405,
+            errorBody('METHOD_NOT_ALLOWED', 'This local route does not accept that method.'),
+            { allow: 'POST' },
+          );
+          request.resume();
+          return;
+        }
+        await handleAssign(request, response, clock, registry, assignmentQueue);
         return;
       }
 

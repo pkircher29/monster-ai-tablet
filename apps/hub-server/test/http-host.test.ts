@@ -184,7 +184,7 @@ test('serves a minimal health response with same-origin security headers', async
     assert.deepEqual(jsonBody(response), {
       status: 'ok',
       service: 'monster-agent-hub',
-      mode: 'PREVIEW_ONLY',
+      mode: 'ASSIGNMENT_QUEUE',
       schemaVersion: 1,
     });
     assert.equal(response.headers['x-content-type-options'], 'nosniff');
@@ -370,6 +370,54 @@ test('injects host-owned identity, time, limits, registry, and provenance into a
     },
     { now },
   );
+});
+
+test('queues an explicitly confirmed delegation without launching commands', async () => {
+  const now = new Date(Date.now() - 1_000);
+  await withTestServer(
+    async (baseUrl) => {
+      const response = await sendRequest(baseUrl, '/api/delegation/assign', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          ...JSON.parse(previewBody()),
+          confirmation: 'ASSIGN',
+        }),
+      });
+      assert.equal(response.statusCode, 202, response.body.toString('utf8'));
+      const assignment = jsonBody(response) as {
+        mode: string;
+        queuedAt: string;
+        assignmentId: string;
+        objective: string;
+        items: Array<{ state: string; agentProfileId: string }>;
+        commandExecution: string;
+      };
+      assert.equal(assignment.mode, 'ASSIGNED');
+      assert.equal(assignment.queuedAt, now.toISOString());
+      assert.match(assignment.assignmentId, /^assignment\.[a-f0-9-]{36}$/);
+      assert.equal(
+        assignment.objective,
+        'Build a local task inbox and verify its safety boundaries.',
+      );
+      assert.equal(assignment.items.length, 4);
+      assert.ok(assignment.items.every((item) => item.state === 'QUEUED'));
+      assert.ok(assignment.items.every((item) => !('command' in item)));
+      assert.equal(assignment.commandExecution, 'DISABLED');
+    },
+    { now },
+  );
+});
+
+test('rejects delegation assignment without the exact explicit confirmation', async () => {
+  await withTestServer(async (baseUrl) => {
+    const response = await sendRequest(baseUrl, '/api/delegation/assign', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: previewBody(),
+    });
+    assert.equal(response.statusCode, 422);
+  });
 });
 
 test('keeps five named agent observations server-owned without inventing benchmark scores', () => {

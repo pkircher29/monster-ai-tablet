@@ -4,7 +4,9 @@ import type { FormEvent, KeyboardEvent } from 'react';
 import {
   HubApiError,
   requestAgentStatus,
+  requestDelegationAssignment,
   requestDelegationPreview,
+  requestToolRecon,
   type AgentRuntimeStatus,
   type AgentId,
   type AgentStatusCode,
@@ -12,6 +14,11 @@ import {
   type AgentStatusSnapshot,
   type DelegationPreviewRequester,
   type DelegationPreviewSummary,
+  type DelegationAssignment,
+  type DelegationAssignmentRequester,
+  type ReconToolCategory,
+  type ToolReconRequester,
+  type ToolReconSnapshot,
 } from './api';
 
 type ConnectionState = 'online' | 'offline';
@@ -21,6 +28,8 @@ interface AppProps {
   readonly connectionState?: ConnectionState;
   readonly previewRequester?: DelegationPreviewRequester;
   readonly agentStatusRequester?: AgentStatusRequester;
+  readonly reconRequester?: ToolReconRequester;
+  readonly assignmentRequester?: DelegationAssignmentRequester;
 }
 
 interface AgentManifestView {
@@ -393,6 +402,64 @@ function DelegationRail({ preview }: Readonly<{ preview: DelegationPreviewSummar
   );
 }
 
+function reconCategoryLabel(category: ReconToolCategory): string {
+  return {
+    HARNESS: 'Harness',
+    IDE: 'IDE',
+    LOCAL_MODEL: 'Local model',
+    ASSISTANT: 'Assistant',
+    INFRASTRUCTURE: 'Infrastructure',
+  }[category];
+}
+
+function AiSpyRecon({
+  snapshot,
+  state,
+}: Readonly<{
+  snapshot: ToolReconSnapshot | null;
+  state: 'awaiting' | 'checking' | 'ready' | 'unavailable';
+}>) {
+  return (
+    <section className="recon-module" aria-labelledby="recon-title">
+      <div className="section-heading">
+        <div>
+          <p className="module-label">Read-only host inventory</p>
+          <h2 id="recon-title">AI-Spy reconnaissance</h2>
+        </div>
+        <p className="rack-count">
+          {snapshot === null
+            ? state === 'checking'
+              ? 'Checking…'
+              : 'Unavailable'
+            : `${snapshot.installedCount} of ${snapshot.catalogCount} detected`}
+        </p>
+      </div>
+      {snapshot === null ? (
+        <p className="recon-empty">
+          {state === 'awaiting'
+            ? 'Reconnect to inspect tools on the trusted host.'
+            : state === 'checking'
+              ? 'Inspecting the fixed tool catalog…'
+              : 'The trusted host did not return a safe inventory.'}
+        </p>
+      ) : (
+        <ul className="recon-list">
+          {snapshot.tools.map((tool) => (
+            <li key={tool.id}>
+              <strong>{tool.name}</strong>
+              <span>{reconCategoryLabel(tool.category)}</span>
+              <small>Vendor: {tool.vendor}</small>
+            </li>
+          ))}
+        </ul>
+      )}
+      <p className="recon-boundary">
+        Commands, key management, and network scanning stay locked in this tablet merge.
+      </p>
+    </section>
+  );
+}
+
 function LimitationDialog({ onClose }: Readonly<{ onClose: () => void }>) {
   const dialogRef = useRef<HTMLDivElement>(null);
   const closeButtonRef = useRef<HTMLButtonElement>(null);
@@ -466,6 +533,8 @@ export function App({
   connectionState: forcedConnectionState,
   previewRequester = requestDelegationPreview,
   agentStatusRequester = requestAgentStatus,
+  reconRequester = requestToolRecon,
+  assignmentRequester = requestDelegationAssignment,
 }: AppProps) {
   const connectionState = useConnectionState(forcedConnectionState);
   const [objective, setObjective] = useState('');
@@ -479,6 +548,12 @@ export function App({
   const [agentStatusState, setAgentStatusState] = useState<
     'awaiting' | 'checking' | 'verified' | 'unavailable'
   >('awaiting');
+  const [toolRecon, setToolRecon] = useState<ToolReconSnapshot | null>(null);
+  const [toolReconState, setToolReconState] = useState<
+    'awaiting' | 'checking' | 'ready' | 'unavailable'
+  >('awaiting');
+  const [assignment, setAssignment] = useState<DelegationAssignment | null>(null);
+  const [isAssigning, setIsAssigning] = useState(false);
   const activePreviewRequestRef = useRef<AbortController | null>(null);
   const previewRequestGenerationRef = useRef(0);
   const isOffline = connectionState === 'offline';
@@ -507,6 +582,7 @@ export function App({
     setIsPlanning(false);
     setPreview(null);
     setPreviewBudgetCap(null);
+    setAssignment(null);
   }, [invalidatePreviewRequest, isOffline]);
 
   useEffect(() => {
@@ -532,6 +608,30 @@ export function App({
     );
     return () => controller.abort();
   }, [agentStatusRequester, isOffline]);
+
+  useEffect(() => {
+    if (isOffline) {
+      setToolRecon(null);
+      setToolReconState('awaiting');
+      return undefined;
+    }
+
+    const controller = new AbortController();
+    setToolReconState('checking');
+    void reconRequester({ signal: controller.signal }).then(
+      (snapshot) => {
+        if (controller.signal.aborted) return;
+        setToolRecon(snapshot);
+        setToolReconState('ready');
+      },
+      () => {
+        if (controller.signal.aborted) return;
+        setToolRecon(null);
+        setToolReconState('unavailable');
+      },
+    );
+    return () => controller.abort();
+  }, [isOffline, reconRequester]);
 
   const handlePlan = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -568,6 +668,7 @@ export function App({
     setObjectiveValidationError(null);
     setRequestError(null);
     setPreview(null);
+    setAssignment(null);
     setPreviewBudgetCap(null);
     setIsPlanning(true);
     try {
@@ -607,6 +708,28 @@ export function App({
         activePreviewRequestRef.current = null;
         setIsPlanning(false);
       }
+    }
+  };
+
+  const handleAssign = async () => {
+    if (preview === null || previewBudgetCap === null || isOffline || isAssigning) return;
+    setIsAssigning(true);
+    setRequestError(null);
+    try {
+      const nextAssignment = await assignmentRequester({
+        objective: preview.objective,
+        workspace: 'monster-agent-hub',
+        budgetCapMicrodollars: previewBudgetCap,
+      });
+      setAssignment(nextAssignment);
+    } catch (error) {
+      setRequestError(
+        error instanceof HubApiError
+          ? error.message
+          : 'The trusted host could not queue this assignment.',
+      );
+    } finally {
+      setIsAssigning(false);
     }
   };
 
@@ -686,9 +809,9 @@ export function App({
       <main id="main-content">
         <section className="composer-module" aria-labelledby="composer-title">
           <div className="composer-intro">
-            <p className="module-label">Objective input · preview only</p>
+            <p className="module-label">Objective input · review then assign</p>
             <h2 id="composer-title">What should the crew accomplish?</h2>
-            <p>Describe the outcome. Planning proposes assignments; it never launches an agent.</p>
+            <p>Describe the outcome, review the route, then assign its work to the local queue.</p>
           </div>
 
           <form className="objective-form" noValidate aria-busy={isPlanning} onSubmit={handlePlan}>
@@ -711,6 +834,7 @@ export function App({
                   setIsPlanning(false);
                   setPreview(null);
                   setPreviewBudgetCap(null);
+                  setAssignment(null);
                   if (objectiveValidationError !== null) {
                     setObjectiveValidationError(null);
                   }
@@ -785,6 +909,8 @@ export function App({
 
         <DelegationRail preview={preview} />
 
+        <AiSpyRecon snapshot={toolRecon} state={toolReconState} />
+
         <div className="workbench-grid">
           <section className="agent-rack" aria-labelledby="agent-rack-title">
             <div className="section-heading">
@@ -826,25 +952,34 @@ export function App({
                   ? 'Create a preview to see authority and cost before anything can run.'
                   : `Preview cost: ${formatMicrodollars(preview.estimatedTotalCostMicrodollars)}. No execution authority has been granted.`}
               </p>
-              <button className="button button--approval" type="button" disabled>
-                Approve and run
+              <button
+                className="button button--approval"
+                type="button"
+                disabled={preview === null || isOffline || isAssigning || assignment !== null}
+                onClick={() => void handleAssign()}
+              >
+                {isAssigning ? 'Assigning…' : assignment === null ? 'Assign work' : 'Work assigned'}
               </button>
               <p className="action-note">
-                Execution is deliberately unavailable in this preview-only milestone.
+                {assignment === null
+                  ? 'This queues the reviewed work to the named agents. Command execution remains locked.'
+                  : `${assignment.items.length} work items are queued. Command execution remains locked.`}
               </p>
             </section>
 
             <section className="live-state" aria-labelledby="live-state-title">
               <div className="live-state__header">
                 <h3 id="live-state-title">Live state</h3>
-                <span className="state-counter">0 active</span>
+                <span className="state-counter">
+                  {assignment === null ? '0 queued' : `${assignment.items.length} queued`}
+                </span>
               </div>
               <div className="empty-state">
                 <span className="empty-state__icon" aria-hidden="true">
                   ∥
                 </span>
                 <div>
-                  <p>No live tasks</p>
+                  <p>{assignment === null ? 'No assigned tasks' : 'Assignment queued'}</p>
                   <p>
                     {isOffline
                       ? 'Catalog and guidance remain available.'

@@ -281,6 +281,7 @@ main {
 
 .composer-module,
 .rail-module,
+.recon-module,
 .agent-rack,
 .live-work {
   border: 1px solid var(--module-edge);
@@ -485,6 +486,51 @@ main {
 .rail-module {
   overflow: hidden;
   padding: clamp(1.1rem, 2vw, 1.6rem);
+}
+
+.recon-module {
+  padding-bottom: 1.1rem;
+}
+
+.recon-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(12rem, 1fr));
+  gap: 0.65rem;
+  margin: 0;
+  padding: 1.1rem;
+  list-style: none;
+}
+
+.recon-list li {
+  display: grid;
+  gap: 0.24rem;
+  padding: 0.8rem;
+  border: 1px solid var(--faint-ceramic);
+  border-radius: 0.75rem;
+  background: var(--deep-ink);
+}
+
+.recon-list span,
+.recon-list small,
+.recon-empty,
+.recon-boundary {
+  color: var(--quiet-ceramic);
+  font-size: 0.78rem;
+}
+
+.recon-list span {
+  color: var(--signal-blue);
+  font-family: 'IBM Plex Mono Variable', Consolas, monospace;
+}
+
+.recon-empty,
+.recon-boundary {
+  margin: 1rem 1.1rem 0;
+}
+
+.recon-boundary {
+  border-left: 2px solid var(--relay-amber);
+  padding-left: 0.7rem;
 }
 
 .section-heading {

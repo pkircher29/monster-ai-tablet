@@ -10,6 +10,10 @@ import {
   type AgentStatusSnapshot,
   type DelegationPreviewRequester,
   type DelegationPreviewSummary,
+  type DelegationAssignment,
+  type DelegationAssignmentRequester,
+  type ToolReconRequester,
+  type ToolReconSnapshot,
 } from './api';
 
 const SERVER_PREVIEW: DelegationPreviewSummary = {
@@ -80,6 +84,51 @@ const LIVE_AGENT_STATUS: AgentStatusSnapshot = {
   ],
 };
 
+const TOOL_RECON: ToolReconSnapshot = {
+  schemaVersion: 1,
+  mode: 'READ_ONLY',
+  source: 'AI_SPY',
+  observedAt: '2026-08-30T09:00:00.000Z',
+  catalogCount: 14,
+  installedCount: 2,
+  tools: [
+    {
+      id: 'claude-code',
+      name: 'Claude Code',
+      category: 'HARNESS',
+      vendor: 'Anthropic',
+      detection: 'BOTH',
+    },
+    {
+      id: 'ollama',
+      name: 'Ollama',
+      category: 'LOCAL_MODEL',
+      vendor: 'Ollama',
+      detection: 'PROFILE',
+    },
+  ],
+  restrictedCapabilities: [
+    'COMMAND_EXECUTION_DISABLED',
+    'KEY_MANAGEMENT_DISABLED',
+    'NETWORK_SCAN_DISABLED',
+  ],
+};
+
+const QUEUED_ASSIGNMENT: DelegationAssignment = {
+  schemaVersion: 1,
+  mode: 'ASSIGNED',
+  assignmentId: 'assignment.11111111-1111-4111-8111-111111111111',
+  queuedAt: '2026-08-30T12:00:00.000Z',
+  objective: SERVER_PREVIEW.objective,
+  items: SERVER_PREVIEW.assignments.map((item) => ({
+    workItemId: item.workItemId,
+    title: SERVER_PREVIEW.workItems.find((workItem) => workItem.id === item.workItemId)!.title,
+    agentProfileId: item.agentProfileId,
+    state: 'QUEUED' as const,
+  })),
+  commandExecution: 'DISABLED',
+};
+
 function deferred<T>() {
   let resolve!: (value: T) => void;
   let reject!: (reason?: unknown) => void;
@@ -112,6 +161,25 @@ afterEach(() => {
 });
 
 describe('Monster Agent Hub tablet shell', () => {
+  it('shows the merged AI-Spy inventory as read-only reconnaissance', async () => {
+    const reconRequester = vi.fn<ToolReconRequester>().mockResolvedValue(TOOL_RECON);
+    render(<App connectionState="online" reconRequester={reconRequester} />);
+
+    const recon = await screen.findByRole('region', { name: 'AI-Spy reconnaissance' });
+    expect(within(recon).getByText('2 of 14 detected')).toBeInTheDocument();
+    expect(within(recon).getByText('Claude Code')).toBeInTheDocument();
+    expect(within(recon).getByText('Ollama')).toBeInTheDocument();
+    expect(within(recon).getByText('Harness')).toBeInTheDocument();
+    expect(within(recon).getByText('Local model')).toBeInTheDocument();
+    expect(
+      within(recon).getByText(/Commands, key management, and network scanning stay locked/),
+    ).toBeInTheDocument();
+    expect(within(recon).queryByRole('button')).not.toBeInTheDocument();
+    expect(reconRequester).toHaveBeenCalledWith(
+      expect.objectContaining({ signal: expect.any(AbortSignal) }),
+    );
+  });
+
   it('replaces declared availability with the trusted host status without exposing diagnostics', async () => {
     const statusRequester = vi.fn<AgentStatusRequester>().mockResolvedValue(LIVE_AGENT_STATUS);
     render(<App connectionState="online" agentStatusRequester={statusRequester} />);
@@ -187,7 +255,7 @@ describe('Monster Agent Hub tablet shell', () => {
       ),
     ).toBeInTheDocument();
     expect(within(preview).getByText('No work started')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Approve and run' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Assign work' })).toBeEnabled();
     expect(screen.getByText('4 work items')).toBeInTheDocument();
     expect(screen.getByText('$0.10 of $0.40')).toBeInTheDocument();
 
@@ -207,6 +275,35 @@ describe('Monster Agent Hub tablet shell', () => {
         .getAllByRole('heading', { level: 3 })
         .map((heading) => heading.textContent),
     ).toEqual(['Hermes', 'Codex', 'Codex', 'Claude Code']);
+  });
+
+  it('queues the reviewed work when the operator explicitly assigns it', async () => {
+    const user = userEvent.setup();
+    const previewRequester = vi.fn().mockResolvedValue(SERVER_PREVIEW);
+    const assignmentRequester = vi
+      .fn<DelegationAssignmentRequester>()
+      .mockResolvedValue(QUEUED_ASSIGNMENT);
+    render(
+      <App
+        connectionState="online"
+        previewRequester={previewRequester}
+        assignmentRequester={assignmentRequester}
+      />,
+    );
+
+    await user.type(screen.getByLabelText('Objective'), SERVER_PREVIEW.objective);
+    await user.click(screen.getByRole('button', { name: 'Plan work' }));
+    await user.click(screen.getByRole('button', { name: 'Assign work' }));
+
+    expect(await screen.findByRole('button', { name: 'Work assigned' })).toBeDisabled();
+    expect(screen.getByText('4 queued')).toBeInTheDocument();
+    expect(screen.getByText('Assignment queued')).toBeInTheDocument();
+    expect(screen.getByText(/4 work items are queued/)).toBeInTheDocument();
+    expect(assignmentRequester).toHaveBeenCalledWith({
+      objective: SERVER_PREVIEW.objective,
+      workspace: 'monster-agent-hub',
+      budgetCapMicrodollars: 400_000,
+    });
   });
 
   it('aborts and ignores an in-flight preview when the objective changes', async () => {
@@ -357,7 +454,7 @@ describe('Monster Agent Hub tablet shell', () => {
     expect(
       screen.getByText('Launches and approvals stay locked until the trusted host reconnects.'),
     ).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Approve and run' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Assign work' })).toBeDisabled();
     expect(screen.getByText('Catalog and guidance remain available.')).toBeInTheDocument();
   });
 
