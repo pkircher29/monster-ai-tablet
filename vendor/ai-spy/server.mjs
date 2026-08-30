@@ -29,6 +29,8 @@ const ROOT = dirname(fileURLToPath(import.meta.url));
 const PUBLIC = join(ROOT, 'public');
 const DATA = join(ROOT, 'data');
 const PORT = +(process.env.PORT || 4177);
+const BIND_HOST = process.env.AISPY_BIND_HOST || '127.0.0.1';
+const INTERNAL_TOKEN = process.env.AISPY_INTERNAL_TOKEN || '';
 const HOSTNAME_ALIAS = process.env.AISPY_HOST || process.env.AGENTOS_HOST || 'ai-spy';
 
 function selfIdentities() {
@@ -63,9 +65,7 @@ function json(res, code, data) {
   const body = JSON.stringify(data);
   res.writeHead(code, {
     'content-type': 'application/json; charset=utf-8',
-    'access-control-allow-origin': '*',
-    'access-control-allow-methods': 'GET, POST, OPTIONS',
-    'access-control-allow-headers': 'content-type',
+    'cache-control': 'no-store',
   });
   res.end(body);
 }
@@ -73,7 +73,13 @@ function json(res, code, data) {
 function readBody(req) {
   return new Promise((resolve, reject) => {
     let buf = '';
-    req.on('data', c => buf += c);
+    req.on('data', c => {
+      buf += c;
+      if (Buffer.byteLength(buf, 'utf8') > 256 * 1024) {
+        reject(new Error('request body too large'));
+        req.destroy();
+      }
+    });
     req.on('end', () => {
       if (!buf) return resolve({});
       try { resolve(JSON.parse(buf)); } catch (e) { reject(e); }
@@ -198,13 +204,8 @@ function listHistory() {
 }
 
 const requestHandler = async (req, res) => {
-  if (req.method === 'OPTIONS') {
-    res.writeHead(204, {
-      'access-control-allow-origin': '*',
-      'access-control-allow-methods': 'GET, POST, OPTIONS',
-      'access-control-allow-headers': 'content-type',
-    });
-    return res.end();
+  if (!INTERNAL_TOKEN || req.headers['x-monster-internal-token'] !== INTERNAL_TOKEN) {
+    return json(res, 403, { error: 'protected by Monster Agent Hub' });
   }
 
   const hostHeader = (req.headers.host || '').split(':')[0].toLowerCase();
@@ -425,25 +426,26 @@ const requestHandler = async (req, res) => {
     res.writeHead(404, { 'content-type': 'text/plain' });
     res.end('not found');
   } catch (err) {
-    json(res, 500, { error: String(err) });
+    json(res, 500, { error: 'AI-Spy request failed' });
   }
 };
 
 function listen(port, label) {
   const s = createServer(requestHandler);
   s.on('error', (e) => console.log(`port ${port} (${label}) unavailable: ${e.code || e.message}`));
-  s.listen(port, '0.0.0.0', () => console.log(`AI-Spy listening on 0.0.0.0:${port} (${label})`));
+  s.listen(port, BIND_HOST, () => console.log(`AI-Spy listening on ${BIND_HOST}:${port} (${label})`));
   return s;
 }
-listen(PORT, 'app');
-if (PORT !== 80) listen(80, 'hostname');
+const appServer = listen(PORT, 'internal-app');
 
-startMdns({
-  names: [`${HOSTNAME_ALIAS}.local`],
-  ipv4: SELF.ips.find(ip => /^(192\.168|10\.|172\.(1[6-9]|2\d|3[01]))\./.test(ip)) || SELF.ips[0],
-  onLog: (m) => console.log(m),
-});
+if (process.env.AISPY_ENABLE_MDNS === '1') {
+  startMdns({
+    names: [`${HOSTNAME_ALIAS}.local`],
+    ipv4: SELF.ips.find(ip => /^(192\.168|10\.|172\.(1[6-9]|2\d|3[01]))\./.test(ip)) || SELF.ips[0],
+    onLog: (m) => console.log(m),
+  });
+}
 
-console.log('Reach it at:');
-console.log(`  LAN:       http://${HOSTNAME_ALIAS}.local  (or :${PORT})`);
-if (SELF.magic) console.log(`  Tailscale: http://${HOSTNAME_ALIAS}  (MagicDNS; run: tailscale set --hostname ${HOSTNAME_ALIAS})`);
+const shutdown = () => appServer.close(() => process.exit(0));
+process.once('SIGTERM', shutdown);
+process.once('SIGINT', shutdown);

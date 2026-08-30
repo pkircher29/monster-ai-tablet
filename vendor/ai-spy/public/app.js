@@ -21,7 +21,8 @@ function setLive(ok) {
 }
 
 async function api(path, opts) {
-  const r = await fetch(path, opts);
+  const routedPath = path.startsWith('/api/') ? '/api/ai-spy/' + path.slice('/api/'.length) : path;
+  const r = await fetch(routedPath, { ...opts, credentials: 'same-origin' });
   if (!r.ok && r.status !== 202) throw new Error(path + ' -> ' + r.status);
   return r.json();
 }
