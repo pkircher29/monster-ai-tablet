@@ -267,6 +267,65 @@ test('serves a host-owned read-only agent status snapshot without probe details'
   }
 });
 
+test('serves a closed AI-Spy tool inventory without paths or command authority', async () => {
+  const snapshot = {
+    schemaVersion: 1 as const,
+    mode: 'READ_ONLY' as const,
+    source: 'AI_SPY' as const,
+    observedAt: '2026-08-30T09:00:00.000Z',
+    catalogCount: 14,
+    installedCount: 2,
+    tools: [
+      {
+        id: 'claude-code',
+        name: 'Claude Code',
+        category: 'HARNESS' as const,
+        vendor: 'Anthropic',
+        detection: 'BOTH' as const,
+      },
+      {
+        id: 'ollama',
+        name: 'Ollama',
+        category: 'LOCAL_MODEL' as const,
+        vendor: 'Ollama',
+        detection: 'PROFILE' as const,
+      },
+    ],
+    restrictedCapabilities: [
+      'COMMAND_EXECUTION_DISABLED' as const,
+      'KEY_MANAGEMENT_DISABLED' as const,
+      'NETWORK_SCAN_DISABLED' as const,
+    ],
+  };
+  let providerCalls = 0;
+  const started = await startHubServer({
+    host: '127.0.0.1',
+    port: 0,
+    staticDirectory,
+    reconProvider: async () => {
+      providerCalls += 1;
+      return snapshot;
+    },
+  });
+  try {
+    const response = await sendRequest(started.url, '/api/recon/tools');
+    assert.equal(response.statusCode, 200);
+    assert.deepEqual(jsonBody(response), snapshot);
+    assert.equal(providerCalls, 1);
+    assert.equal(response.headers['cache-control'], 'no-store');
+    assert.doesNotMatch(
+      response.body.toString('utf8').toLowerCase(),
+      /clipath|commandline|executable|homedir|stderr|stdout|token|secret|pricing/,
+    );
+
+    const wrongMethod = await sendRequest(started.url, '/api/recon/tools', { method: 'POST' });
+    assert.equal(wrongMethod.statusCode, 405);
+    assert.equal(wrongMethod.headers.allow, 'GET');
+  } finally {
+    await stopHubServer(started.server);
+  }
+});
+
 test('injects host-owned identity, time, limits, registry, and provenance into a preview', async () => {
   const now = new Date(Date.now() - 1_000);
   await withTestServer(

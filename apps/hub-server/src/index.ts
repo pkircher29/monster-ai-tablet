@@ -34,6 +34,12 @@ export {
   stopHubServer,
 } from './http/server.js';
 export { DelegationPreviewInputError } from './input.js';
+export {
+  RECON_TOOL_CATALOG,
+  createDirectCliLocator,
+  createToolReconProvider,
+} from './recon/index.js';
+export type { CliLocator, ReconToolDefinition, ToolReconProviderOptions } from './recon/index.js';
 export { createOpenRouterAdapter, OpenRouterAdapterError } from './providers/openrouter/index.js';
 export type {
   AtomicReservationLedger,
@@ -60,9 +66,14 @@ export type {
   AgentStatusSnapshot,
   HubRequestHandlerOptions,
   HubServerOptions,
+  ReconProvider,
+  ReconToolCategory,
+  ReconToolDetection,
+  ReconToolSummary,
   ServerOwnedAgentEvidence,
   ServerOwnedAgentRegistry,
   StartedHubServer,
+  ToolReconSnapshot,
 } from './http/types.js';
 export type {
   CandidateAvailability,
