@@ -33,7 +33,7 @@ export function createAgentProbeCommands(
       command('codex.auth', 'codex', ['login', 'status']),
       command('claude.version', 'claude', ['--version']),
       command('claude.auth', 'claude', ['auth', 'status', '--json']),
-      command('openclaw.gateway', 'openclaw', ['gateway', 'status', '--json']),
+      command('openclaw.gateway', 'openclaw', ['gateway', 'status', '--json', '--no-probe']),
     ]);
   }
 
@@ -64,6 +64,7 @@ export function createAgentProbeCommands(
       'gateway',
       'status',
       '--json',
+      '--no-probe',
     ]),
   ]);
 }

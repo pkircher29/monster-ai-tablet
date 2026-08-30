@@ -47,8 +47,6 @@ test('maps server-owned live probes to a closed status snapshot without leaking 
         stdout: JSON.stringify({
           cli: { version: '2026.7.1-2', entrypoint: 'C:\\private\\openclaw.mjs' },
           service: { runtime: { status: 'running', pid: 1234 } },
-          health: { healthy: true },
-          rpc: { error: 'private gateway detail' },
         }),
       },
     ],
@@ -112,6 +110,10 @@ test('maps server-owned live probes to a closed status snapshot without leaking 
   assert.ok(seenCommands.every((command) => command.maxOutputBytes <= 32 * 1_024));
   assert.ok(seenCommands.every((command) => command.executable.length > 0));
   assert.ok(seenCommands.every((command) => Object.isFrozen(command.args)));
+  assert.deepEqual(
+    seenCommands.find((command) => command.probeId === 'openclaw.gateway')?.args.slice(-4),
+    ['gateway', 'status', '--json', '--no-probe'],
+  );
   assert.doesNotMatch(
     JSON.stringify(snapshot).toLowerCase(),
     /private|email|orgid|token|pid|entrypoint|executable|command|stdout|stderr|path/,

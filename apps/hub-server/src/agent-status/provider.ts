@@ -124,15 +124,11 @@ export function createLiveAgentStatusProvider(
       String(nestedRecord(openClawJson ?? {}, 'cli')?.version ?? ''),
       /^([^\s]+)$/,
     );
-    const openClawHealthy = nestedRecord(openClawJson ?? {}, 'health')?.healthy === true;
     const openClawRunning =
       nestedRecord(nestedRecord(openClawJson ?? {}, 'service') ?? {}, 'runtime')?.status ===
       'running';
     const openClaw =
-      openClawResult.exitCode === 0 &&
-      openClawVersion !== null &&
-      openClawHealthy &&
-      openClawRunning
+      openClawResult.exitCode === 0 && openClawVersion !== null && openClawRunning
         ? ({
             id: 'openclaw',
             state: 'READY',
