@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512" role="img" aria-label="Monster Agent Hub">
+  <rect width="512" height="512" rx="90" fill="#0B1420"/>
+  <rect x="54" y="54" width="404" height="404" rx="58" fill="#172A3A" stroke="#F2EEDB" stroke-width="16"/>
+  <path d="M128 352V160h54l74 99 74-99h54v192h-59V251l-69 91-69-91v101h-59Z" fill="#F2EEDB"/>
+  <path d="M90 115h332" stroke="#6CB7E8" stroke-width="22" stroke-linecap="round"/>
+  <circle cx="128" cy="115" r="27" fill="#F2B84B"/>
+  <circle cx="384" cy="115" r="27" fill="#6CB7E8"/>
+</svg>

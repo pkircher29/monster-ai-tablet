@@ -1,0 +1,12 @@
+node_modules/
+coverage/
+dist/
+.codebase-memory/
+package-lock.json
+*.tsbuildinfo
+
+# Preserve the planning and research artifacts that predate this scaffold.
+docs/compatibility-research.md
+docs/device-baseline.md
+tasks/plan.md
+tasks/todo.md

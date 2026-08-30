@@ -1,0 +1,28 @@
+# Dependencies
+node_modules/
+
+# Build and test output
+coverage/
+dist/
+output/
+.playwright-cli/
+*.tsbuildinfo
+
+# Local configuration and secrets
+.env
+.env.*
+!.env.example
+
+# Logs
+*.log
+npm-debug.log*
+
+# Editors and operating systems
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+
+# Temporary files
+*.tmp
+tmp/

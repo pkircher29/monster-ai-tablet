@@ -1,0 +1,33 @@
+{
+  "name": "monster-agent-hub",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Local-first workspace for the Monster Agent Hub tablet and host services.",
+  "license": "UNLICENSED",
+  "type": "module",
+  "packageManager": "npm@11.13.0",
+  "engines": {
+    "node": ">=22.13.0",
+    "npm": ">=10.9.0"
+  },
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "build": "tsc --build --pretty false && npm run build --workspaces --if-present",
+    "typecheck": "tsc --project tsconfig.json --noEmit --pretty false && npm run typecheck --workspaces --if-present",
+    "test": "npm run test --workspaces --if-present",
+    "lint": "eslint . && npm run lint --workspaces --if-present",
+    "format": "prettier --write --ignore-unknown .",
+    "format:check": "prettier --check --ignore-unknown .",
+    "check": "npm run lint && npm run format:check && npm run typecheck && npm test && npm run build"
+  },
+  "devDependencies": {
+    "@eslint/js": "10.0.1",
+    "eslint": "10.9.1",
+    "prettier": "3.9.6",
+    "typescript": "6.0.3",
+    "typescript-eslint": "8.68.0"
+  }
+}
