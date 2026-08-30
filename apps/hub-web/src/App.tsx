@@ -454,8 +454,12 @@ function AiSpyRecon({
         </ul>
       )}
       <p className="recon-boundary">
-        Commands, key management, and network scanning stay locked in this tablet merge.
+        The full console requires an operator login. Execution, key changes, model changes, skill
+        deployment, directives, and LAN scans require a separate one-use approval.
       </p>
+      <a className="button button--secondary recon-console-link" href="/ai-spy/">
+        Open full AI-Spy console
+      </a>
     </section>
   );
 }

@@ -533,6 +533,11 @@ main {
   padding-left: 0.7rem;
 }
 
+.recon-console-link {
+  display: inline-flex;
+  margin: 0.85rem 1.1rem 0;
+}
+
 .section-heading {
   display: flex;
   align-items: end;

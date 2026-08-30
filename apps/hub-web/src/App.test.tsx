@@ -171,9 +171,11 @@ describe('Monster Agent Hub tablet shell', () => {
     expect(within(recon).getByText('Ollama')).toBeInTheDocument();
     expect(within(recon).getByText('Harness')).toBeInTheDocument();
     expect(within(recon).getByText('Local model')).toBeInTheDocument();
-    expect(
-      within(recon).getByText(/Commands, key management, and network scanning stay locked/),
-    ).toBeInTheDocument();
+    expect(within(recon).getByText(/require a separate one-use approval/)).toBeInTheDocument();
+    expect(within(recon).getByRole('link', { name: 'Open full AI-Spy console' })).toHaveAttribute(
+      'href',
+      '/ai-spy/',
+    );
     expect(within(recon).queryByRole('button')).not.toBeInTheDocument();
     expect(reconRequester).toHaveBeenCalledWith(
       expect.objectContaining({ signal: expect.any(AbortSignal) }),
