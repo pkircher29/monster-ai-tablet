@@ -45,6 +45,8 @@ an implementation.
 - The agent rack reads a host-owned `GET /api/agents/status` snapshot. Hermes, Codex, Claude Code,
   and OpenClaw are checked with bounded server-owned probes; Antigravity is reported honestly as a
   supervised desktop-only tool.
+- Closed status snapshots are retained in a capped local SQLite history on the Windows host, so
+  availability evidence survives a hub restart without storing raw probe output.
 - A host-owned registry decomposes an objective into research, implementation, verification, and
   review work, then returns versioned agent/model/tool assignments with evidence and cost bounds.
 - The OpenRouter adapter is exact-model, no-tools by default, secret-safe, and budget-reserved. No

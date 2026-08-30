@@ -15,7 +15,7 @@
 - [x] Implement versioned contracts and adversarial validation tests
 - [ ] Implement manifest-driven agent registry
 - [x] Implement bounded read-only health probes for all five named agent profiles
-- [ ] Persist bounded status history in SQLite
+- [x] Persist bounded status history in SQLite
 - [x] Build accessible, responsive installable PWA
 - [ ] Add authentication, redaction, CSP, and private-network checks
 

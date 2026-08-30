@@ -1,14 +1,19 @@
 export { createDelegationPreview, getReadyWorkItemIds } from './delegation-preview.js';
 export {
   createAgentProbeCommands,
+  createAgentStatusHistoryStore,
   createLiveAgentStatusProvider,
+  defaultAgentStatusDatabasePath,
   runAgentProbeCommand,
+  withAgentStatusHistory,
 } from './agent-status/index.js';
 export type {
   AgentProbeCommand,
   AgentProbeId,
   AgentProbeResult,
   AgentProbeRunner,
+  AgentStatusHistoryStore,
+  AgentStatusHistoryStoreOptions,
   LiveAgentStatusProvider,
   LiveAgentStatusProviderOptions,
 } from './agent-status/index.js';
