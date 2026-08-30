@@ -661,6 +661,7 @@ export function createHubRequestHandler(
     options.agentStatusProvider ?? createDefaultAgentStatusProvider(clock);
   const reconProvider = options.reconProvider ?? createToolReconProvider({ clock });
   const auth = options.auth;
+  const aiSpyProxy = options.aiSpyProxy;
   const assignmentQueue = new Map<string, unknown>();
 
   return async (request, response) => {
@@ -746,6 +747,31 @@ export function createHubRequestHandler(
         return;
       }
 
+      if (path === '/api/ai-spy' || path.startsWith('/api/ai-spy/')) {
+        if (aiSpyProxy === undefined) {
+          sendJson(response, 503, errorBody('AI_SPY_NOT_CONFIGURED', 'AI-Spy is not configured.'));
+          request.resume();
+          return;
+        }
+        const result = await aiSpyProxy.handle(
+          request,
+          request.url ?? path,
+          auth?.authenticate(request.headers.cookie) ?? null,
+        );
+        writeResponse(
+          response,
+          result.statusCode,
+          {
+            'cache-control': result.cacheControl,
+            'content-type': result.contentType,
+            ...result.extraHeaders,
+          },
+          result.body,
+          request.method === 'HEAD',
+        );
+        return;
+      }
+
       if (path === '/api/agents/status') {
         if (request.method !== 'GET') {
           sendJson(
@@ -809,6 +835,27 @@ export function createHubRequestHandler(
       if (isApiPath(path)) {
         sendNotFound(response, request.method === 'HEAD');
         request.resume();
+        return;
+      }
+
+      if (path === '/ai-spy' || path.startsWith('/ai-spy/')) {
+        if (aiSpyProxy === undefined) {
+          sendJson(response, 503, errorBody('AI_SPY_NOT_CONFIGURED', 'AI-Spy is not configured.'));
+          request.resume();
+          return;
+        }
+        const result = await aiSpyProxy.handle(request, request.url ?? path, null);
+        writeResponse(
+          response,
+          result.statusCode,
+          {
+            'cache-control': result.cacheControl,
+            'content-type': result.contentType,
+            ...result.extraHeaders,
+          },
+          result.body,
+          request.method === 'HEAD',
+        );
         return;
       }
 

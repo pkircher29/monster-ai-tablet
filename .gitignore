@@ -9,6 +9,7 @@ output/
 *.tsbuildinfo
 
 # Local configuration and secrets
+.monster-hub/
 .env
 .env.*
 !.env.example
